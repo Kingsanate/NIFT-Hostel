@@ -1,0 +1,55 @@
+name: nift_hostel_flutter
+description: "NIFT Hostel — Smart Student Management System"
+publish_to: 'none'
+
+version: 2.7.0+270
+
+environment:
+  sdk: '>=3.0.0 <4.0.0'
+
+dependencies:
+  flutter:
+    sdk: flutter
+  cupertino_icons: ^1.0.8
+  image_picker: ^1.1.2
+  flutter_animate: ^4.5.2
+  google_generative_ai: ^0.4.7
+  http: ^1.6.0
+  supabase_flutter: ^2.15.2
+  share_plus: ^12.0.2
+  google_fonts: ^8.1.0
+  speech_to_text: ^7.4.0
+  camera: ^0.12.0+1
+  shared_preferences: ^2.5.5
+  image: ^4.2.0
+  pdf: any
+  printing: any
+  google_mlkit_face_detection: ^0.13.2
+  file_picker: ^11.0.2
+  flutter_local_notifications: ^22.0.1
+  timezone: ^0.11.1
+  flutter_timezone: ^5.1.0
+  intl: ^0.20.3
+  flutter_riverpod: ^3.3.2
+  hive: ^2.2.3
+  hive_flutter: ^1.1.0
+  path_provider: ^2.1.2
+  image_editor: ^1.6.0
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^5.0.0
+
+flutter:
+  uses-material-design: true
+
+  assets:
+    - shorebird.yaml
+    - assets/images/
+
+flutter_launcher_icons:
+  android: true
+  ios: true
+  image_path: "assets/logo.png"
+  min_sdk_size: 21

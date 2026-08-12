@@ -1,0 +1,40 @@
+# Security & Cache headers for Cloudflare Pages (Flutter Web)
+
+# Flutter web assets — aggressive caching (content-hashed filenames)
+/flutter.js
+  Cache-Control: public, max-age=31536000, immutable
+
+/main.dart.js
+  Cache-Control: public, max-age=31536000, immutable
+
+/canvaskit/*
+  Cache-Control: public, max-age=31536000, immutable
+
+/*.wasm
+  Cache-Control: public, max-age=31536000, immutable
+
+# Fonts — cache for 1 year
+/fonts/*
+  Cache-Control: public, max-age=31536000, immutable
+
+# Assets — cache for 1 week
+/assets/*
+  Cache-Control: public, max-age=604800
+
+# Service worker & manifest — never cache
+/flutter_service_worker.js
+  Cache-Control: no-cache, no-store, must-revalidate
+
+/manifest.json
+  Cache-Control: no-cache, no-store, must-revalidate
+
+# Main entry — never cache (ensures users always get latest version)
+/index.html
+  Cache-Control: no-cache, no-store, must-revalidate
+
+# Security headers — applied to all pages
+/*
+  X-Frame-Options: DENY
+  X-Content-Type-Options: nosniff
+  Referrer-Policy: strict-origin-when-cross-origin
+  Permissions-Policy: camera=self, microphone=self, geolocation=()
