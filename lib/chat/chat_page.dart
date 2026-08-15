@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 
 import 'chat_palette.dart';
@@ -7,15 +8,14 @@ import 'widgets/conversation_list.dart';
 import '../scanner/hostel_selection_page.dart';
 import '../scanner/models/student_model.dart';
 import '../students/student_entries_page.dart';
-import 'dart:async';
 import '../main.dart'; // For AppConfig
-import '../events/events_page.dart';
 import '../rules/rules_page.dart';
+import '../rules/data/default_rules.dart';
 import '../attendance/attendance_page.dart';
+import '../late_entry/late_entry_page.dart';
 import 'services/chat_service.dart';
-import 'package:supabase_flutter/supabase_flutter.dart';
-import 'package:shared_preferences/shared_preferences.dart';
-import 'dart:convert';
+import '../services/api_service.dart';
+import '../services/student_repository.dart';
 
 class ChatPage extends StatefulWidget {
   final SidebarDestination? initialDestination;
@@ -39,17 +39,14 @@ class _ChatPageState extends State<ChatPage> {
   late SidebarDestination _selectedDestination;
   bool _sidebarVisible = true;
 
-  // Students added via scanner
-  List<StudentModel> _addedStudents = [];
-
   // Map to store ChatService instances for different conversations
   final Map<String, ChatService> _chatServices = {};
 
-  // Additional database state
-  List<Map<String, dynamic>> _roomsData = [];
-  List<Map<String, dynamic>> _attendanceData = [];
-  List<Map<String, dynamic>> _complaintsData = [];
-  List<Map<String, dynamic>> _rulesData = [];
+  // Additional database state - seeded with default rules immediately
+  List<Map<String, dynamic>> _rulesData = DefaultRulesData.getDefaultRulesModels()
+      .values
+      .map((m) => m.toJson())
+      .toList();
   Timer? _refreshTimer;
 
   @override
@@ -57,17 +54,20 @@ class _ChatPageState extends State<ChatPage> {
     super.initState();
     _selectedDestination = widget.initialDestination ?? SidebarDestination.newChat;
     if (widget.newlyAddedStudent != null) {
-      _addedStudents.insert(0, widget.newlyAddedStudent!);
+      StudentRepository.addStudent(widget.newlyAddedStudent!);
     }
     _conversations = [];
-    _loadCachedData();
-    _fetchDatabaseState();
 
-    // Start background timer to refresh configuration and data from Supabase periodically
-    _refreshTimer = Timer.periodic(const Duration(seconds: 15), (timer) {
+    // Trigger silent background sync
+    StudentRepository.syncWithBackend();
+    _fetchRules();
+
+    // Fallback periodic sync every 60s
+    _refreshTimer = Timer.periodic(const Duration(seconds: 60), (timer) {
       if (mounted) {
-        _fetchDatabaseState();
-        AppConfig.loadFromSupabase();
+        StudentRepository.syncWithBackend();
+        _fetchRules();
+        AppConfig.loadFromOracle();
       }
     });
   }
@@ -78,111 +78,31 @@ class _ChatPageState extends State<ChatPage> {
     super.dispose();
   }
 
-  Future<void> _loadCachedData() async {
+  Future<void> _fetchRules() async {
     try {
-      final prefs = await SharedPreferences.getInstance();
-      final cachedStudentsJson = prefs.getString('cached_students');
-      
-      if (cachedStudentsJson != null) {
-        final List<dynamic> decoded = jsonDecode(cachedStudentsJson);
-        final cachedStudentsList = decoded.map((e) => e as Map<String, dynamic>).toList();
-        
-        final allStudents = <StudentModel>[];
-        allStudents.addAll(cachedStudentsList.map((e) => StudentModel.fromSupabase(e, e['hostel'] ?? 'Unknown')));
-        
-        if (mounted) {
-          setState(() {
-            _addedStudents = allStudents..sort((a, b) => b.createdAt.compareTo(a.createdAt));
-          });
-        }
-      }
-    } catch (e) {
-      debugPrint('Error loading cached data: $e');
-    }
-  }
-
-  Future<void> _fetchDatabaseState() async {
-    try {
-      // Helper function to fetch data and return empty list on failure
-      Future<List<Map<String, dynamic>>> safeFetch(String table, [String columns = '*']) async {
-        try {
-          final res = await Supabase.instance.client.from(table).select(columns);
-          return List<Map<String, dynamic>>.from(res);
-        } catch (e) {
-          debugPrint('Warning: Could not fetch table $table - $e');
-          return [];
-        }
-      }
-
-      final prefs = await SharedPreferences.getInstance();
-      Future<List<Map<String, dynamic>>> fetchRules() async {
-        final freshRules = await safeFetch('hostel_rules', 'hostel_name, extracted_text');
-        if (freshRules.isNotEmpty) {
-          prefs.setString('cached_rules', jsonEncode(freshRules));
-          return freshRules;
-        }
-        final cached = prefs.getString('cached_rules');
-        if (cached != null) {
-          try {
-            return List<Map<String, dynamic>>.from(jsonDecode(cached));
-          } catch (e) {
-            debugPrint('Failed to decode cached rules: $e');
-          }
-        }
-        return [];
-      }
-
-      final responses = await Future.wait([
-        safeFetch('students'), // Unified students table
-        safeFetch('attendance_records'),
-        safeFetch('complaints'),
-        fetchRules(),
-        safeFetch('rooms'), // Add rooms table
-      ]);
-
-      final allStudents = <StudentModel>[];
-      final allRooms = <Map<String, dynamic>>[];
-      final allAttendance = <Map<String, dynamic>>[];
-      final allComplaints = <Map<String, dynamic>>[];
-      final allRules = <Map<String, dynamic>>[];
-
-      if (responses.length >= 5) {
-        // Parse the unified students
-        String mapHostelId(String? id) {
-          if (id == 'boys_hostel') return 'Boys Hostel';
-          if (id == 'umsawli_girls') return 'Umsawli Girls';
-          if (id == 'nongthymmai_girls') return 'Nongthymmai Girls';
-          return 'Boys Hostel'; // fallback
-        }
-        allStudents.addAll(responses[0].map((e) => StudentModel.fromSupabase(e, mapHostelId(e['hostelId']?.toString()))));
-
-        // Use actual rooms table from database
-        allRooms.addAll(responses[4]);
-
-        allAttendance.addAll(responses[1]);
-        allComplaints.addAll(responses[2]);
-        allRules.addAll(responses[3]);
-      }
-
-      if (mounted) {
+      final rules = await ApiService.fetchRules();
+      if (rules.isNotEmpty && mounted) {
         setState(() {
-          _addedStudents = allStudents..sort((a, b) => b.createdAt.compareTo(a.createdAt));
-          _roomsData = allRooms;
-          _attendanceData = allAttendance;
-          _complaintsData = allComplaints;
-          _rulesData = allRules;
+          _rulesData = rules.map((e) => Map<String, dynamic>.from(e)).toList();
         });
       }
-      
-      // Update cache with latest student data
-      try {
-        final prefs = await SharedPreferences.getInstance();
-        await prefs.setString('cached_students', jsonEncode(responses[0]));
-      } catch (cacheError) {
-        debugPrint('Failed to cache students: $cacheError');
-      }
-    } catch (e) {
-      debugPrint('Error fetching database state: $e');
+    } catch (_) {}
+  }
+
+  int get _destinationIndex {
+    switch (_selectedDestination) {
+      case SidebarDestination.newChat:
+        return 0;
+      case SidebarDestination.totalEntries:
+        return 1;
+      case SidebarDestination.lateEntry:
+        return 2;
+      case SidebarDestination.rules:
+        return 3;
+      case SidebarDestination.attendance:
+        return 4;
+      case SidebarDestination.hostellerEntry:
+        return 0;
     }
   }
 
@@ -230,9 +150,11 @@ class _ChatPageState extends State<ChatPage> {
                         () => _selectedDestination =
                             SidebarDestination.totalEntries));
                   },
-                  onEvents: () {
+                  onLateEntry: () {
                     Navigator.of(context).pop();
-                    Future.microtask(_openEvents);
+                    Future.microtask(() => setState(
+                        () => _selectedDestination =
+                            SidebarDestination.lateEntry));
                   },
                   onRules: () {
                     Navigator.of(context).pop();
@@ -261,7 +183,9 @@ class _ChatPageState extends State<ChatPage> {
                   onTotalEntries: () => setState(
                       () => _selectedDestination =
                           SidebarDestination.totalEntries),
-                  onEvents: _openEvents,
+                  onLateEntry: () => setState(
+                      () => _selectedDestination =
+                          SidebarDestination.lateEntry),
                   onRules: () => setState(
                       () => _selectedDestination =
                           SidebarDestination.rules),
@@ -280,87 +204,85 @@ class _ChatPageState extends State<ChatPage> {
   }
 
   Widget _buildMainArea(BuildContext ctx, bool compact) {
-    // Show student entries page
-    if (_selectedDestination == SidebarDestination.totalEntries) {
-      return StudentEntriesPage(
-        entries: _addedStudents,
-        onScanNew: _openScanner,
-        onBack: () => setState(
-            () => _selectedDestination = SidebarDestination.newChat),
-        onDeleteStudent: (id) {
-          setState(() {
-            _addedStudents.removeWhere((s) => s.id == id);
-          });
-        },
-        onUpdateStudent: (updatedStudent) {
-          setState(() {
-            final idx = _addedStudents.indexWhere((s) => s.id == updatedStudent.id);
-            if (idx != -1) {
-              _addedStudents[idx] = updatedStudent;
-            }
-          });
-        },
-      );
-    }
+    return ValueListenableBuilder<List<StudentModel>>(
+      valueListenable: StudentRepository.studentsNotifier,
+      builder: (context, studentList, _) {
+        return IndexedStack(
+          index: _destinationIndex,
+          children: [
+            // 0: Chat Window
+            ChatWindow(
+              conversation: _selectedConversation,
+              isGenerating: _isGenerating,
+              streamingText: _streamingText,
+              sidebarVisible: !compact && _sidebarVisible,
+              onMenuPressed: () {
+                if (compact) {
+                  Scaffold.of(ctx).openDrawer();
+                } else {
+                  setState(() => _sidebarVisible = !_sidebarVisible);
+                }
+              },
+              onNewChat: _startNewChat,
+              onSend: _sendMessage,
+            ),
 
-    // Show events page
-    if (_selectedDestination == SidebarDestination.events) {
-      return EventsPage(
-        compact: compact,
-        onMenuPressed: () {
-          if (compact) {
-            Scaffold.of(ctx).openDrawer();
-          } else {
-            setState(() => _sidebarVisible = !_sidebarVisible);
-          }
-        },
-      );
-    }
+            // 1: Student Entries Page
+            StudentEntriesPage(
+              entries: studentList,
+              onScanNew: _openScanner,
+              onBack: () => setState(
+                  () => _selectedDestination = SidebarDestination.newChat),
+              onDeleteStudent: (id) async {
+                await StudentRepository.deleteStudent(id);
+                ApiService.deleteStudent(id).catchError((e) => false);
+              },
+              onUpdateStudent: (updatedStudent) async {
+                await StudentRepository.updateStudent(updatedStudent);
+                ApiService.updateStudent(updatedStudent.id, updatedStudent.toBackend())
+                    .catchError((e) => false);
+              },
+            ),
 
-    // Show rules page
-    if (_selectedDestination == SidebarDestination.rules) {
-      return RulesPage(
-        compact: compact,
-        onMenuPressed: () {
-          if (compact) {
-            Scaffold.of(ctx).openDrawer();
-          } else {
-            setState(() => _sidebarVisible = !_sidebarVisible);
-          }
-        },
-      );
-    }
+            // 2: Late Entry Page
+            LateEntryPage(
+              compact: compact,
+              onMenuPressed: () {
+                if (compact) {
+                  Scaffold.of(ctx).openDrawer();
+                } else {
+                  setState(() => _sidebarVisible = !_sidebarVisible);
+                }
+              },
+            ),
 
-    // Show attendance page
-    if (_selectedDestination == SidebarDestination.attendance) {
-      return AttendancePage(
-        students: _addedStudents,
-        compact: compact,
-        onMenuPressed: () {
-          if (compact) {
-            Scaffold.of(ctx).openDrawer();
-          } else {
-            setState(() => _sidebarVisible = !_sidebarVisible);
-          }
-        },
-      );
-    }
+            // 3: Rules Page
+            RulesPage(
+              compact: compact,
+              onMenuPressed: () {
+                if (compact) {
+                  Scaffold.of(ctx).openDrawer();
+                } else {
+                  setState(() => _sidebarVisible = !_sidebarVisible);
+                }
+              },
+            ),
 
-    // Show chat window
-    return ChatWindow(
-      conversation: _selectedConversation,
-      isGenerating: _isGenerating,
-      streamingText: _streamingText,
-      sidebarVisible: !compact && _sidebarVisible,
-      onMenuPressed: () {
-        if (compact) {
-          Scaffold.of(ctx).openDrawer();
-        } else {
-          setState(() => _sidebarVisible = !_sidebarVisible);
-        }
+            // 4: Attendance Page
+            AttendancePage(
+              students: studentList,
+              compact: compact,
+              onMenuPressed: () {
+                if (compact) {
+                  Scaffold.of(ctx).openDrawer();
+                } else {
+                  setState(() => _sidebarVisible = !_sidebarVisible);
+                }
+              },
+            ),
+          ],
+        );
       },
-      onNewChat: _startNewChat,
-      onSend: _sendMessage,
     );
   }
 
@@ -369,21 +291,25 @@ class _ChatPageState extends State<ChatPage> {
     required VoidCallback onNewChat,
     required VoidCallback onHostellerEntry,
     required VoidCallback onTotalEntries,
-    required VoidCallback onEvents,
+    required VoidCallback onLateEntry,
     required VoidCallback onRules,
     required VoidCallback onAttendance,
   }) {
-    final total = _addedStudents.length; // real entries
-    return ConversationList(
-      selectedDestination: _selectedDestination,
-      totalEntryCount: total,
-      onNewChat: onNewChat,
-      onHostellerEntry: onHostellerEntry,
-      onTotalEntries: onTotalEntries,
-      onEvents: onEvents,
-      onRules: onRules,
-      onAttendance: onAttendance,
-      onClose: onClose,
+    return ValueListenableBuilder<List<StudentModel>>(
+      valueListenable: StudentRepository.studentsNotifier,
+      builder: (context, studentList, _) {
+        return ConversationList(
+          selectedDestination: _selectedDestination,
+          totalEntryCount: studentList.length,
+          onNewChat: onNewChat,
+          onHostellerEntry: onHostellerEntry,
+          onTotalEntries: onTotalEntries,
+          onLateEntry: onLateEntry,
+          onRules: onRules,
+          onAttendance: onAttendance,
+          onClose: onClose,
+        );
+      },
     );
   }
 
@@ -424,8 +350,9 @@ class _ChatPageState extends State<ChatPage> {
     );
 
     if (result != null && mounted) {
+      await StudentRepository.addStudent(result);
+      if (!mounted) return;
       setState(() {
-        _addedStudents.insert(0, result);
         _selectedDestination = SidebarDestination.totalEntries;
       });
       
@@ -450,12 +377,6 @@ class _ChatPageState extends State<ChatPage> {
       setState(() => _selectedDestination = prev);
     }
   }
-
-  void _openEvents() {
-    setState(() => _selectedDestination = SidebarDestination.events);
-  }
-
-
 
   Future<void> _sendMessage(String text) async {
     final now = DateTime.now();
@@ -494,8 +415,6 @@ class _ChatPageState extends State<ChatPage> {
       _generatingConversationId = updated.id;
     });
 
-    // Database state is already fetched periodically or on init.
-    // Do NOT fetch it synchronously here, as it delays the AI stream by 4 seconds.
     final reply = await _getAiReply(text, conv);
     if (!mounted) return;
 
@@ -546,7 +465,7 @@ class _ChatPageState extends State<ChatPage> {
 
   Future<void> _fetchRulesOnly() async {
     try {
-      final res = await Supabase.instance.client.from('hostel_rules').select();
+      final res = await ApiService.fetchRules();
       if (mounted) {
         setState(() {
           _rulesData = List<Map<String, dynamic>>.from(res);
@@ -558,10 +477,9 @@ class _ChatPageState extends State<ChatPage> {
   }
 
   Future<String> _getAiReply(String prompt, Conversation conv) async {
-    // Fast synchronous fetch of latest configuration and rules to guarantee freshness
     try {
       await Future.wait([
-        AppConfig.loadFromSupabase(),
+        AppConfig.loadFromOracle(),
         _fetchRulesOnly(),
       ]).timeout(const Duration(milliseconds: 1500));
     } catch (e) {
@@ -573,21 +491,20 @@ class _ChatPageState extends State<ChatPage> {
     }
     final service = _chatServices[conv.id]!;
     final previousMessages = conv.messages;
+    final students = StudentRepository.students;
     
     String finalReply = '';
-    // Use the streaming method — update state on each chunk for word-by-word display
     await for (final chunk in service.sendMessageStream(
       prompt, 
       previousMessages, 
-      _addedStudents,
-      _roomsData,
-      _attendanceData,
-      _complaintsData,
+      students,
+      const [],
+      const [],
       _rulesData,
     )) {
       if (!mounted) break;
       finalReply = chunk;
-      setState(() => _streamingText = chunk); // 🔥 Updates bubble live
+      setState(() => _streamingText = chunk);
     }
     return finalReply;
   }

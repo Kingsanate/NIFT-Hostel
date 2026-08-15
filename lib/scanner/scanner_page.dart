@@ -1,4 +1,4 @@
-import 'package:flutter/foundation.dart' show kIsWeb;
+﻿import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:flutter_animate/flutter_animate.dart';
 import 'package:image_picker/image_picker.dart';
@@ -78,8 +78,10 @@ class _ScannerPageState extends State<ScannerPage>
     try {
       final file = await ImagePicker().pickImage(
         source: ImageSource.gallery,
-        imageQuality: 85,  // Higher quality for better OCR accuracy
-        maxWidth: 1400,    // Wider image = more readable text for Gemini
+        // Resize params are skipped on web — the web resizer is canvas-based
+        // and can throw; ExtractionService optimizes the image before AI.
+        imageQuality: kIsWeb ? null : 85, // Higher quality for better OCR accuracy
+        maxWidth: kIsWeb ? null : 1400, // Wider image = more readable text for Gemini
       );
       if (file != null && mounted) {
         final bytes = await file.readAsBytes();
@@ -195,7 +197,7 @@ class _ScannerPageState extends State<ScannerPage>
 class _GridBackground extends StatelessWidget {
   @override
   Widget build(BuildContext context) =>
-      Positioned.fill(child: CustomPaint(painter: _GridPainter()));
+      Positioned.fill(child: RepaintBoundary(child: CustomPaint(painter: _GridPainter())));
 }
 
 class _GridPainter extends CustomPainter {
@@ -234,7 +236,7 @@ class _TopBar extends StatelessWidget {
             Text('Scan Admission Form',
                 style: TextStyle(
                     color: ChatPalette.text,
-                    fontSize: 17,
+                    fontSize: 14,
                     fontWeight: FontWeight.w700)),
             SizedBox(height: 2),
             Text('Align the form inside the frame',
@@ -310,7 +312,7 @@ class _ScanArea extends StatelessWidget {
             ),
 
             // Corner frame (Google Blue)
-            Positioned.fill(child: CustomPaint(painter: _FramePainter())),
+            Positioned.fill(child: RepaintBoundary(child: CustomPaint(painter: _FramePainter()))),
 
             // Sweeping blue scan line
             AnimatedBuilder(
@@ -595,7 +597,7 @@ class _HelpSheet extends StatelessWidget {
           Text('Scanning Tips',
               style: TextStyle(
                   color: ChatPalette.text,
-                  fontSize: 17,
+                  fontSize: 14,
                   fontWeight: FontWeight.w700)),
           SizedBox(height: 16),
           ...tips.map((t) => Padding(

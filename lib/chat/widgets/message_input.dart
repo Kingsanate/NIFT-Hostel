@@ -231,11 +231,11 @@ class _InputBox extends StatelessWidget {
                   textCapitalization: TextCapitalization.sentences,
                   style: TextStyle(
                     color: ChatPalette.text,
-                    fontSize: 15,
+                    fontSize: 13,
                     height: 1.45,
                   ),
                   decoration: InputDecoration(
-                    hintText: isListening ? 'Listening...' : 'Ask anything about ${AppConfig.appName}…',
+                    hintText: isListening ? 'Listening...' : 'Ask Anything',
                     isCollapsed: true,
                     contentPadding: EdgeInsets.zero,
                     border: InputBorder.none,
@@ -243,7 +243,7 @@ class _InputBox extends StatelessWidget {
                     focusedBorder: InputBorder.none,
                     hintStyle: TextStyle(
                       color: isListening ? ChatPalette.accent : ChatPalette.dim, 
-                      fontSize: 15
+                      fontSize: 13
                     ),
                   ),
                 ),

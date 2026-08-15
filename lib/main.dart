@@ -1,6 +1,5 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:camera/camera.dart';
 import 'package:google_fonts/google_fonts.dart';
@@ -8,31 +7,37 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:hive_flutter/hive_flutter.dart';
 
 import 'core/config_provider.dart';
-
+import 'services/api_service.dart';
+import 'services/websocket_service.dart';
 import 'chat/chat_palette.dart';
-import 'splash_screen.dart';
+import 'chat/chat_page.dart';
+import 'auth/login_page.dart';
 import 'services/notification_service.dart';
+import 'services/student_repository.dart';
+import 'services/student_record_cache.dart';
 
 final GlobalKey<NavigatorState> navigatorKey = GlobalKey<NavigatorState>();
 
-/// All API keys (Groq, Gemini) are fetched exclusively from the Supabase
-/// `app_config` table at runtime. No keys are ever hardcoded in the client.
+/// All API keys (Groq, Gemini) are fetched from the Oracle self-hosted
+/// backend `/api/hostels/config` at runtime and cached in Hive.
 class AppConfig {
   static String appName = 'NIFT Hostel Shillong';
   static String appSubtitle = 'NIFT Hostel Shillong';
 
-  // Keys start empty — populated from Supabase app_config table only.
+  // 3 Groq API Keys for High-Speed Chat — loaded from the backend at runtime
   static List<String> groqKeys = [];
+
+  // 3 Gemini API Keys for Document Scanner — loaded from the backend at runtime
   static List<String> scannerKeys = [];
-  static String chatPrompt = '';
+
+  static String chatPrompt = 'You are the friendly and professional NIFT Hostel AI Assistant. Always be concise, helpful, and polite.';
   static String scannerPrompt = '';
   static List<String> activeKeys = [];
 
-  static Future<void> loadFromSupabase() async {
+  static Future<void> loadFromOracle() async {
     try {
-      final res = await Supabase.instance.client.from('app_config').select().limit(1);
-      if (res.isNotEmpty) {
-        final data = res.first;
+      final data = await ApiService.fetchConfig();
+      if (data.isNotEmpty) {
         if (data['app_name'] != null && data['app_name'].toString().isNotEmpty) appName = data['app_name'];
         if (data['app_subtitle'] != null && data['app_subtitle'].toString().isNotEmpty) appSubtitle = data['app_subtitle'];
         if (data['groq_chat_key'] != null && data['groq_chat_key'].toString().isNotEmpty) {
@@ -41,19 +46,12 @@ class AppConfig {
         if (data['chat_prompt'] != null && data['chat_prompt'].toString().isNotEmpty) chatPrompt = data['chat_prompt'].toString().trim();
         if (data['scanner_prompt'] != null && data['scanner_prompt'].toString().isNotEmpty) scannerPrompt = data['scanner_prompt'].toString().trim();
 
-        List<String> dynamicKeys = [];
-        final k1 = data['gemini_chat_key']?.toString().trim() ?? '';
-        
         if (data['gemini_scanner_key'] != null && data['gemini_scanner_key'].toString().isNotEmpty) {
           scannerKeys = data['gemini_scanner_key'].toString().split(',').map((e) => e.trim()).where((e) => e.isNotEmpty).toList();
         }
-
-        if (k1.isNotEmpty) dynamicKeys.add(k1);
-        
-        activeKeys = dynamicKeys;
       }
     } catch (e) {
-      debugPrint('Failed to load dynamic config: $e');
+      debugPrint('Failed to load dynamic config from Oracle: $e');
     }
   }
 }
@@ -74,18 +72,15 @@ Future<void> initCamerasIfNeeded() async {
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
-  // Allow runtime font fetching with fallback to default fonts if offline
-  GoogleFonts.config.allowRuntimeFetching = true;
+  // Use bundled Roboto font to prevent network blocking on cold boot
+  GoogleFonts.config.allowRuntimeFetching = false;
 
   final prefs = await SharedPreferences.getInstance();
   darkModeNotifier.value = prefs.getBool('darkMode') ?? false;
 
-  // Uses the PUBLIC anon key only — never the service_role secret.
-  await Supabase.initialize(
-    url: 'https://hrydivnnodnpzdphwxyu.supabase.co',
-    publishableKey: 'sb_publishable_iS7--gEg76NC-kQ5kj9s7Q_I9pw2o8B',
-  );
-  
+  // Initialize Native High-Speed Real-Time WebSockets
+  WebSocketService.instance.connect();
+
   try {
     await NotificationService().init();
   } catch (e) {
@@ -100,12 +95,28 @@ void main() async {
   await Hive.initFlutter();
   await Hive.openBox('appConfig');
 
+  // Initialize WhatsApp-style instant in-memory Student repository & Record Cache
+  try {
+    await StudentRepository.init();
+    await StudentRecordCache.init();
+  } catch (e) {
+    debugPrint('Failed to initialize caches: $e');
+  }
+
+  // Background non-blocking config sync
+  AppConfig.loadFromOracle();
+
+  // Check auth session immediately for zero-delay startup (no splash screen)
+  final token = prefs.getString('auth_token');
+  final bool isLoggedIn = (token != null && token.isNotEmpty);
+
   // Run the app wrapped in ProviderScope for Riverpod
-  runApp(const ProviderScope(child: NiftHostelApp()));
+  runApp(ProviderScope(child: NiftHostelApp(isLoggedIn: isLoggedIn)));
 }
 
 class NiftHostelApp extends ConsumerWidget {
-  const NiftHostelApp({super.key});
+  final bool isLoggedIn;
+  const NiftHostelApp({super.key, this.isLoggedIn = false});
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -158,7 +169,7 @@ class NiftHostelApp extends ConsumerWidget {
               hintStyle: TextStyle(color: Color(0xFF9CA3AF)),
             ),
           ),
-          home: const SplashScreen(),
+          home: isLoggedIn ? const ChatPage() : const LoginPage(),
         );
       },
     );

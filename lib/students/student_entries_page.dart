@@ -5,13 +5,17 @@ import 'dart:convert';
 import 'dart:math' show min;
 import 'dart:typed_data';
 import 'package:share_plus/share_plus.dart';
-import 'package:supabase_flutter/supabase_flutter.dart';
 import '../chat/chat_palette.dart';
 import '../scanner/models/student_model.dart';
+import '../services/api_service.dart';
+import '../services/websocket_service.dart';
+import '../services/student_repository.dart';
+import 'student_record_page.dart';
 
 // Top-level cache to survive hot reloads and avoid State static issues in dart2js
 final Map<String, String?> globalMockBookingTypes = {};
 final Map<String, DateTime?> globalMockBookingTimes = {};
+final Set<String> globalCancelledBookings = <String>{};
 
 class StudentEntriesPage extends StatefulWidget {
   final List<StudentModel> entries;
@@ -33,51 +37,85 @@ class StudentEntriesPage extends StatefulWidget {
   State<StudentEntriesPage> createState() => _StudentEntriesPageState();
 }
 
-class _StudentEntriesPageState extends State<StudentEntriesPage> {
+class _StudentEntriesPageState extends State<StudentEntriesPage>
+    with AutomaticKeepAliveClientMixin {
   final _searchCtrl = TextEditingController();
   String _query = '';
   String _hostelFilter = 'All';
+  Timer? _debounceTimer;
   StreamSubscription? _medSub;
   final Map<String, DateTime> _liveBookings = {};
+  final Map<String, String> _liveBookingTypes = {};
+
+  @override
+  bool get wantKeepAlive => true;
 
   @override
   void initState() {
     super.initState();
-    _medSub = Supabase.instance.client
-        .from('medical_appointments')
-        .stream(primaryKey: ['id'])
-        .listen((data) {
-      if (mounted) {
-        setState(() {
-          _liveBookings.clear();
-          // Collect student IDs that still have a waiting appointment
-          final waitingStudentIds = <String>{};
-          for (var row in data) {
-            if (row['status'] == 'waiting') {
-              final studentId = row['student_id']?.toString();
-              if (studentId != null) {
-                waitingStudentIds.add(studentId);
-                final timeStr = row['created_at']?.toString();
-                _liveBookings[studentId] = timeStr != null ? DateTime.parse(timeStr) : DateTime.now();
-              }
-            }
+    _medSub = WebSocketService.instance.events.listen((event) {
+      if (event['type'] != 'MEDICAL_CHANGED') return;
+      final data = event['data'];
+      if (data is! Map<String, dynamic>) return;
+      final apt = data['appointment'];
+      final action = data['action']?.toString() ?? '';
+      final studentId = apt is Map<String, dynamic>
+          ? (apt['student_id']?.toString() ?? '')
+          : (data['student_id']?.toString() ?? '');
+      final rollNo = apt is Map<String, dynamic>
+          ? (apt['roll_no']?.toString() ?? apt['student_roll_no']?.toString() ?? '')
+          : (data['roll_no']?.toString() ?? '');
+
+      if (!mounted) return;
+      setState(() {
+        if (action == 'delete') {
+          if (studentId.isNotEmpty) {
+            globalCancelledBookings.add(studentId);
+            _liveBookings.remove(studentId);
+            _liveBookingTypes.remove(studentId);
+            globalMockBookingTypes.remove(studentId);
+            globalMockBookingTimes.remove(studentId);
           }
-          // Clear local mock cache for any student no longer in the waiting queue
-          // This ensures the "Booked for Doctor" card disappears immediately
-          globalMockBookingTypes.removeWhere(
-            (id, type) => type == 'doctor' && !waitingStudentIds.contains(id),
-          );
-          globalMockBookingTimes.removeWhere(
-            (id, _) => !waitingStudentIds.contains(id),
-          );
-        });
-      }
+          if (rollNo.isNotEmpty) {
+            globalCancelledBookings.add(rollNo);
+            _liveBookings.remove(rollNo);
+            _liveBookingTypes.remove(rollNo);
+            globalMockBookingTypes.remove(rollNo);
+            globalMockBookingTimes.remove(rollNo);
+          }
+        } else if (apt is Map<String, dynamic>) {
+          if (studentId.isNotEmpty) globalCancelledBookings.remove(studentId);
+          if (rollNo.isNotEmpty) globalCancelledBookings.remove(rollNo);
+          final created =
+              DateTime.tryParse(apt['created_at']?.toString() ?? '') ??
+                  DateTime.now();
+          final rawType = (apt['appointment_type'] ?? apt['type'] ?? '')
+              .toString()
+              .toLowerCase();
+          final type = (rawType.contains('counsel') || rawType.contains('counsell'))
+              ? 'counsellor'
+              : 'doctor';
+          if (studentId.isNotEmpty) {
+            _liveBookings[studentId] = created;
+            _liveBookingTypes[studentId] = type;
+            globalMockBookingTypes[studentId] = type;
+            globalMockBookingTimes[studentId] = created;
+          }
+          if (rollNo.isNotEmpty) {
+            _liveBookings[rollNo] = created;
+            _liveBookingTypes[rollNo] = type;
+            globalMockBookingTypes[rollNo] = type;
+            globalMockBookingTimes[rollNo] = created;
+          }
+        }
+      });
     });
   }
 
   @override
   void dispose() {
     _searchCtrl.dispose();
+    _debounceTimer?.cancel();
     _medSub?.cancel();
     super.dispose();
   }
@@ -144,6 +182,7 @@ class _StudentEntriesPageState extends State<StudentEntriesPage> {
 
   @override
   Widget build(BuildContext context) {
+    super.build(context);
     final list = _filtered;
     final allStudents = widget.entries;
     final total = allStudents.length;
@@ -165,7 +204,12 @@ class _StudentEntriesPageState extends State<StudentEntriesPage> {
           umsawliCount: umsawliCount,
           nongthymmaiCount: nongthymmaiCount,
         ),
-        _SearchBar(ctrl: _searchCtrl, onChanged: (v) => setState(() => _query = v)),
+        _SearchBar(ctrl: _searchCtrl, onChanged: (v) {
+          _debounceTimer?.cancel();
+          _debounceTimer = Timer(const Duration(milliseconds: 300), () {
+            if (mounted) setState(() => _query = v);
+          });
+        }),
         _FilterChips(
           selected: _hostelFilter,
           onChanged: (v) => setState(() => _hostelFilter = v),
@@ -178,13 +222,65 @@ class _StudentEntriesPageState extends State<StudentEntriesPage> {
                   itemCount: list.length,
                   itemBuilder: (context, i) {
                     final student = list[i];
+                    final isCancelled = globalCancelledBookings.contains(student.id) ||
+                        globalCancelledBookings.contains(student.rollNo);
+                    final isBooked = !isCancelled && (
+                        _liveBookings.containsKey(student.id) ||
+                        _liveBookings.containsKey(student.rollNo) ||
+                        globalMockBookingTimes.containsKey(student.id) ||
+                        globalMockBookingTimes.containsKey(student.rollNo) ||
+                        (student.medicalBookingTime != null && student.medicalBookingType != null)
+                    );
+                    final bTime = isCancelled
+                        ? null
+                        : (_liveBookings[student.id] ??
+                            _liveBookings[student.rollNo] ??
+                            globalMockBookingTimes[student.id] ??
+                            globalMockBookingTimes[student.rollNo] ??
+                            student.medicalBookingTime);
+                    final bType = isCancelled
+                        ? null
+                        : (_liveBookingTypes[student.id] ??
+                            _liveBookingTypes[student.rollNo] ??
+                            globalMockBookingTypes[student.id] ??
+                            globalMockBookingTypes[student.rollNo] ??
+                            student.medicalBookingType);
+
                     return _StudentCard(
                       student: student,
                       index: i,
-                      isLiveBooked: _liveBookings.containsKey(student.id),
-                      liveTime: _liveBookings[student.id],
+                      isLiveBooked: isBooked,
+                      liveTime: bTime,
+                      liveType: bType,
                       onDelete: widget.onDeleteStudent,
                       onUpdate: widget.onUpdateStudent,
+                      onBookingChanged: (studentId, rollNo, type, time) {
+                        setState(() {
+                          if (type == null) {
+                            globalCancelledBookings.add(studentId);
+                            globalCancelledBookings.add(rollNo);
+                            _liveBookings.remove(studentId);
+                            _liveBookings.remove(rollNo);
+                            _liveBookingTypes.remove(studentId);
+                            _liveBookingTypes.remove(rollNo);
+                            globalMockBookingTypes.remove(studentId);
+                            globalMockBookingTypes.remove(rollNo);
+                            globalMockBookingTimes.remove(studentId);
+                            globalMockBookingTimes.remove(rollNo);
+                          } else {
+                            globalCancelledBookings.remove(studentId);
+                            globalCancelledBookings.remove(rollNo);
+                            _liveBookings[studentId] = time ?? DateTime.now();
+                            _liveBookings[rollNo] = time ?? DateTime.now();
+                            _liveBookingTypes[studentId] = type;
+                            _liveBookingTypes[rollNo] = type;
+                            globalMockBookingTypes[studentId] = type;
+                            globalMockBookingTypes[rollNo] = type;
+                            globalMockBookingTimes[studentId] = time ?? DateTime.now();
+                            globalMockBookingTimes[rollNo] = time ?? DateTime.now();
+                          }
+                        });
+                      },
                     );
                   },
                 ),
@@ -243,7 +339,7 @@ class _EntriesHeader extends StatelessWidget {
             child: Text('Student Entries',
                 style: TextStyle(
                     color: ChatPalette.text,
-                    fontSize: 17,
+                    fontSize: 14,
                     fontWeight: FontWeight.w700)),
           ),
           // Scan new button
@@ -347,7 +443,7 @@ class _StatChip extends StatelessWidget {
           Text(value,
               style: TextStyle(
                   color: color,
-                  fontSize: 16,
+                  fontSize: 14,
                   fontWeight: FontWeight.w900,
                   letterSpacing: -0.5)),
           SizedBox(height: 2),
@@ -507,16 +603,20 @@ class _StudentCard extends StatefulWidget {
   final int index;
   final bool isLiveBooked;
   final DateTime? liveTime;
+  final String? liveType;
   final Function(String)? onDelete;
   final Function(StudentModel)? onUpdate;
+  final Function(String studentId, String rollNo, String? type, DateTime? time)? onBookingChanged;
 
   const _StudentCard({
     required this.student,
     required this.index,
     this.isLiveBooked = false,
     this.liveTime,
+    this.liveType,
     this.onDelete,
     this.onUpdate,
+    this.onBookingChanged,
   });
 
   @override
@@ -596,11 +696,11 @@ Hostel: ${s.hostel}
                   color: ChatPalette.accentRose.withValues(alpha: 0.1),
                   shape: BoxShape.circle,
                 ),
-                child: Icon(Icons.delete_forever_rounded, color: ChatPalette.accentRose, size: 40),
+                child: Icon(Icons.delete_forever_rounded, color: ChatPalette.accentRose, size: 28),
               ),
               const SizedBox(height: 20),
               Text('Remove Student?', 
-                  style: TextStyle(color: ChatPalette.text, fontSize: 20, fontWeight: FontWeight.bold)),
+                  style: TextStyle(color: ChatPalette.text, fontSize: 16, fontWeight: FontWeight.bold)),
               const SizedBox(height: 10),
               Text(
                 'Are you sure you want to completely remove ${widget.student.name} from the database? This action cannot be undone.',
@@ -642,71 +742,334 @@ Hostel: ${s.hostel}
     );
     if (confirm != true) return;
 
-    try {
-      await Supabase.instance.client.from('students').delete().eq('id', widget.student.id);
-      
-      if (widget.onDelete != null) widget.onDelete!(widget.student.id);
+    final studentId = widget.student.id;
+    // 1. Instantly close detail modal (0ms UI lag)
+    if (mounted) Navigator.pop(context);
 
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Successfully deleted!', style: TextStyle(fontWeight: FontWeight.bold, color: Colors.white)),
-            backgroundColor: ChatPalette.accentRose,
-            behavior: SnackBarBehavior.floating,
-            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+    // 2. Instantly update UI and local state
+    if (widget.onDelete != null) widget.onDelete!(studentId);
+
+    // 3. Show instant confirmation snackbar
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: const Text('Student deleted successfully', style: TextStyle(fontWeight: FontWeight.bold, color: Colors.white)),
+          backgroundColor: ChatPalette.accentRose,
+          behavior: SnackBarBehavior.floating,
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+          duration: const Duration(seconds: 2),
+        ),
+      );
+    }
+
+    // 4. Background server deletion
+    ApiService.deleteStudent(studentId).catchError((e) {
+      debugPrint('Background delete failed for $studentId: $e');
+      return false;
+    });
+  }
+
+  void _updateBooking(String? type, {String? notes}) {
+    final studentId = widget.student.id;
+    final rollNo = widget.student.rollNo;
+
+    final raw = type?.toLowerCase();
+    final isCouns = raw != null &&
+        (raw.contains('counsel') || raw.contains('counsell'));
+    final normType = raw == null ? null : (isCouns ? 'counsellor' : 'doctor');
+    final updatedTime = normType != null ? DateTime.now() : null;
+
+    // 1. Instantly update global cache (0ms lag)
+    if (normType != null) {
+      globalCancelledBookings.remove(studentId);
+      globalCancelledBookings.remove(rollNo);
+      globalMockBookingTypes[studentId] = normType;
+      globalMockBookingTypes[rollNo] = normType;
+      globalMockBookingTimes[studentId] = updatedTime;
+      globalMockBookingTimes[rollNo] = updatedTime;
+    } else {
+      globalCancelledBookings.add(studentId);
+      globalCancelledBookings.add(rollNo);
+      globalMockBookingTypes.remove(studentId);
+      globalMockBookingTypes.remove(rollNo);
+      globalMockBookingTimes.remove(studentId);
+      globalMockBookingTimes.remove(rollNo);
+    }
+
+    // 2. Instantly notify parent widget so list reflects cancellation/booking immediately
+    widget.onBookingChanged?.call(studentId, rollNo, normType, updatedTime);
+
+    // 3. Update single source of truth in StudentRepository
+    final updatedStudent = widget.student.copyWith(
+      medicalBookingType: normType,
+      medicalBookingTime: updatedTime,
+      clearMedicalBooking: normType == null,
+    );
+    StudentRepository.updateStudent(updatedStudent);
+    if (widget.onUpdate != null) {
+      widget.onUpdate!(updatedStudent);
+    }
+
+    // 4. Immediately rebuild local card
+    if (mounted) setState(() {});
+
+    // 5. INSTANT (0.0 sec) SNACKBAR FEEDBACK — popup shows immediately!
+    if (mounted) {
+      ScaffoldMessenger.of(context).hideCurrentSnackBar();
+      if (normType != null) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          content: Text(
+            'Booked for ${normType == 'doctor' ? 'Campus Doctor' : 'Campus Counselor'} ✓',
+            style: const TextStyle(
+                fontWeight: FontWeight.bold, color: Colors.white),
           ),
-        );
+          backgroundColor: normType == 'doctor'
+              ? ChatPalette.accentBlue
+              : ChatPalette.accentAmber,
+          behavior: SnackBarBehavior.floating,
+          shape:
+              RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+          duration: const Duration(seconds: 2),
+        ));
+      } else {
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+          content: Text(
+            'Appointment cancelled ✓',
+            style: TextStyle(fontWeight: FontWeight.bold, color: Colors.white),
+          ),
+          backgroundColor: Color(0xFF4A5568),
+          behavior: SnackBarBehavior.floating,
+          shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.all(Radius.circular(10))),
+          duration: Duration(seconds: 2),
+        ));
       }
-    } catch (e) {
-      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Error: $e')));
+    }
+
+    // 6. Background network request (non-blocking, zero UI lag)
+    if (normType != null) {
+      ApiService.bookAppointment(
+        studentId,
+        normType,
+        notes: notes ?? 'Booked by Warden',
+        studentData: widget.student,
+        createdAt: updatedTime,
+      ).catchError((e) {
+        debugPrint('Background booking error: $e');
+        return false;
+      });
+    } else {
+      ApiService.cancelAppointment(studentId, rollNo: rollNo).catchError((e) {
+        debugPrint('Background cancellation error: $e');
+        return false;
+      });
     }
   }
 
-  void _updateBooking(String? type, {String? notes}) async {
-    final updatedTime = type != null ? DateTime.now() : null;
-    
-    // Update local cache first
-    globalMockBookingTypes[widget.student.id] = type;
-    globalMockBookingTimes[widget.student.id] = updatedTime;
+  void _openStudentRecord() {
+    Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (ctx) => StudentRecordPage(
+          student: widget.student.copyWith(
+            medicalBookingType: _currentBookingType,
+            medicalBookingTime: _currentBookingTime,
+          ),
+          onUpdateStudent: (updated) {
+            if (widget.onUpdate != null) widget.onUpdate!(updated);
+            if (mounted) setState(() {});
+          },
+        ),
+      ),
+    );
+  }
 
-    // 1. Try to update the students table
-    try {
-      await Supabase.instance.client.from('students').update({
-        'medicalBookingType': type,
-        'medicalBookingTime': updatedTime?.toIso8601String(),
-      }).eq('id', widget.student.id);
-    } catch (e) {
-      debugPrint('Failed to update students table (columns might be missing): $e');
-    }
+  void _showBookingSheet() {
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: Colors.transparent,
+      builder: (ctx) => Container(
+        padding: const EdgeInsets.fromLTRB(20, 16, 20, 24),
+        decoration: BoxDecoration(
+          color: ChatPalette.surface,
+          borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withValues(alpha: 0.15),
+              blurRadius: 20,
+              offset: const Offset(0, -4),
+            ),
+          ],
+        ),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            // Handle bar
+            Center(
+              child: Container(
+                width: 40,
+                height: 4,
+                margin: const EdgeInsets.only(bottom: 16),
+                decoration: BoxDecoration(
+                  color: ChatPalette.border,
+                  borderRadius: BorderRadius.circular(2),
+                ),
+              ),
+            ),
 
-    // 2. Try to insert into medical_appointments
-    if (type == 'doctor') {
-      try {
-        await Supabase.instance.client.from('medical_appointments').insert({
-          'student_id': widget.student.id,
-          'student_name': widget.student.name,
-          'student_roll_no': widget.student.rollNo,
-          'department': widget.student.department,
-          'hostel': widget.student.hostel,
-          'room_no': widget.student.roomNo,
-          'status': 'waiting',
-          'warden_notes': notes ?? 'Booked by Warden',
-          'created_at': updatedTime?.toIso8601String(),
-          'profile_photo_base64': widget.student.profilePhotoBase64,
-        });
-        debugPrint('Successfully inserted into medical_appointments!');
-      } catch (e) {
-        debugPrint('Error inserting medical_appointment: $e');
-      }
-    }
+            // Header
+            Row(
+              children: [
+                Container(
+                  padding: const EdgeInsets.all(8),
+                  decoration: BoxDecoration(
+                    color: ChatPalette.accentBlue.withValues(alpha: 0.1),
+                    borderRadius: BorderRadius.circular(10),
+                  ),
+                  child: Icon(Icons.medical_services_rounded,
+                      color: ChatPalette.accentBlue, size: 22),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        'Book Appointment',
+                        style: TextStyle(
+                          color: ChatPalette.text,
+                          fontSize: 16,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                      const SizedBox(height: 2),
+                      Text(
+                        '${widget.student.name} · Room ${widget.student.roomNo}',
+                        style: TextStyle(
+                          color: ChatPalette.muted,
+                          fontSize: 12,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                IconButton(
+                  onPressed: () => Navigator.pop(ctx),
+                  icon: Icon(Icons.close_rounded, color: ChatPalette.dim, size: 20),
+                  visualDensity: VisualDensity.compact,
+                ),
+              ],
+            ),
+            const SizedBox(height: 20),
 
-    // Always update the UI locally
-    if (widget.onUpdate != null) {
-      widget.onUpdate!(widget.student.copyWith(
-        medicalBookingType: globalMockBookingTypes[widget.student.id],
-        medicalBookingTime: globalMockBookingTimes[widget.student.id],
-      ));
-    }
+            // Two Provider Options (Doctor & Counselor)
+            Row(
+              children: [
+                // Option 1: Campus Doctor
+                Expanded(
+                  child: GestureDetector(
+                    onTap: () {
+                      Navigator.pop(ctx);
+                      _updateBooking('doctor');
+                    },
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(vertical: 20, horizontal: 14),
+                      decoration: BoxDecoration(
+                        color: ChatPalette.accentBlue.withValues(alpha: 0.08),
+                        borderRadius: BorderRadius.circular(16),
+                        border: Border.all(color: ChatPalette.accentBlue.withValues(alpha: 0.3)),
+                      ),
+                      child: Column(
+                        children: [
+                          Container(
+                            padding: const EdgeInsets.all(12),
+                            decoration: BoxDecoration(
+                              color: ChatPalette.accentBlue.withValues(alpha: 0.15),
+                              shape: BoxShape.circle,
+                            ),
+                            child: Icon(Icons.local_hospital_rounded,
+                                color: ChatPalette.accentBlue, size: 26),
+                          ),
+                          const SizedBox(height: 12),
+                          Text(
+                            'Doctor',
+                            style: TextStyle(
+                              color: ChatPalette.accentBlue,
+                              fontSize: 15,
+                              fontWeight: FontWeight.bold,
+                            ),
+                          ),
+                          const SizedBox(height: 4),
+                          Text(
+                            'Checkup & Treatment',
+                            textAlign: TextAlign.center,
+                            style: TextStyle(
+                              color: ChatPalette.muted,
+                              fontSize: 11,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 14),
+
+                // Option 2: Campus Counselor
+                Expanded(
+                  child: GestureDetector(
+                    onTap: () {
+                      Navigator.pop(ctx);
+                      _updateBooking('counsellor');
+                    },
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(vertical: 20, horizontal: 14),
+                      decoration: BoxDecoration(
+                        color: ChatPalette.accentAmber.withValues(alpha: 0.08),
+                        borderRadius: BorderRadius.circular(16),
+                        border: Border.all(color: ChatPalette.accentAmber.withValues(alpha: 0.3)),
+                      ),
+                      child: Column(
+                        children: [
+                          Container(
+                            padding: const EdgeInsets.all(12),
+                            decoration: BoxDecoration(
+                              color: ChatPalette.accentAmber.withValues(alpha: 0.15),
+                              shape: BoxShape.circle,
+                            ),
+                            child: Icon(Icons.psychology_rounded,
+                                color: ChatPalette.accentAmber, size: 26),
+                          ),
+                          const SizedBox(height: 12),
+                          Text(
+                            'Counselor',
+                            style: TextStyle(
+                              color: ChatPalette.accentAmber,
+                              fontSize: 15,
+                              fontWeight: FontWeight.bold,
+                            ),
+                          ),
+                          const SizedBox(height: 4),
+                          Text(
+                            'Mental Wellbeing',
+                            textAlign: TextAlign.center,
+                            style: TextStyle(
+                              color: ChatPalette.muted,
+                              fontSize: 11,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 12),
+          ],
+        ),
+      ),
+    );
   }
 
 
@@ -722,7 +1085,7 @@ Hostel: ${s.hostel}
         padding: const EdgeInsets.only(bottom: 16),
         child: TextField(
           controller: controller,
-          style: TextStyle(color: Colors.white, fontSize: 15),
+          style: TextStyle(color: Colors.white, fontSize: 13),
           decoration: InputDecoration(
             labelText: label,
             labelStyle: TextStyle(color: ChatPalette.muted, fontSize: 14),
@@ -791,7 +1154,7 @@ Hostel: ${s.hostel}
                     Text('Edit Student',
                         style: TextStyle(
                             color: Colors.white,
-                            fontSize: 20,
+                            fontSize: 16,
                             fontWeight: FontWeight.bold,
                             letterSpacing: -0.5)),
                   ],
@@ -828,7 +1191,7 @@ Hostel: ${s.hostel}
                         padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 16),
                         foregroundColor: ChatPalette.muted,
                       ),
-                      child: const Text('Cancel', style: TextStyle(fontSize: 15, fontWeight: FontWeight.w600)),
+                      child: const Text('Cancel', style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600)),
                     ),
                     const SizedBox(width: 12),
                     ElevatedButton(
@@ -851,7 +1214,7 @@ Hostel: ${s.hostel}
                         elevation: 0,
                         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
                       ),
-                      child: const Text('Save Changes', style: TextStyle(fontSize: 15, fontWeight: FontWeight.bold)),
+                      child: const Text('Save Changes', style: TextStyle(fontSize: 13, fontWeight: FontWeight.bold)),
                     ),
                   ],
                 ),
@@ -864,7 +1227,7 @@ Hostel: ${s.hostel}
 
     if (result != null) {
       try {
-        await Supabase.instance.client.from('students').update(result.toSupabase()).eq('id', result.id);
+        await ApiService.updateStudent(result.id, result.toBackend());
         if (widget.onUpdate != null) widget.onUpdate!(result);
 
         if (mounted) {
@@ -883,53 +1246,53 @@ Hostel: ${s.hostel}
     }
   }
 
-  static const _palette = [
-    [Color(0xFF334DFF), Color(0xFF7C8FFF)], // electric indigo
-    [Color(0xFF00C17A), Color(0xFF00F5A0)], // neon green
-    [Color(0xFFCC2B45), Color(0xFFFF4D6D)], // hot rose
-    [Color(0xFFFF8C00), Color(0xFFFFB340)], // amber
-    [Color(0xFF8B2DCC), Color(0xFFBD5EFF)], // purple
-  ];
-
   String? get _currentBookingType {
-    if (widget.isLiveBooked) return 'doctor';
-    
-    // Fallback to mock cache or student's saved state
-    final fallbackType = globalMockBookingTypes.containsKey(widget.student.id) 
-        ? globalMockBookingTypes[widget.student.id] 
-        : widget.student.medicalBookingType;
-        
-    // If fallback is 'doctor' but isLiveBooked is false, it means the doctor 
-    // has completed the appointment and this is a stale status! Ignore it.
-    if (fallbackType == 'doctor') return null;
-    
-    return fallbackType;
+    // 1. If explicitly cancelled locally, return null immediately (0ms instant revert)
+    if (globalCancelledBookings.contains(widget.student.id) ||
+        globalCancelledBookings.contains(widget.student.rollNo)) {
+      return null;
+    }
+
+    // 2. Check local cache
+    if (globalMockBookingTypes.containsKey(widget.student.id)) {
+      return globalMockBookingTypes[widget.student.id];
+    }
+    if (globalMockBookingTypes.containsKey(widget.student.rollNo)) {
+      return globalMockBookingTypes[widget.student.rollNo];
+    }
+
+    // 3. Live stream from medical_appointments
+    if (widget.isLiveBooked) {
+      final live = widget.liveType;
+      if (live == 'doctor' || live == 'counsellor') return live;
+      return 'doctor';
+    }
+
+    return widget.student.medicalBookingType;
   }
 
   DateTime? get _currentBookingTime {
+    // 1. If explicitly cancelled locally, return null immediately (0ms instant revert)
+    if (globalCancelledBookings.contains(widget.student.id) ||
+        globalCancelledBookings.contains(widget.student.rollNo)) {
+      return null;
+    }
+
+    if (globalMockBookingTimes.containsKey(widget.student.id)) {
+      return globalMockBookingTimes[widget.student.id];
+    }
+    if (globalMockBookingTimes.containsKey(widget.student.rollNo)) {
+      return globalMockBookingTimes[widget.student.rollNo];
+    }
     if (widget.isLiveBooked) return widget.liveTime;
-    if (globalMockBookingTimes.containsKey(widget.student.id)) return globalMockBookingTimes[widget.student.id];
     return widget.student.medicalBookingTime;
   }
 
-  List<Color> get _gradient {
+  Color? get _bookingAccentColor {
     final type = _currentBookingType;
-    if (type == 'doctor') {
-      return ChatPalette.gradientPrimary;
-    } else if (type == 'counsellor') {
-      return ChatPalette.gradientAmber;
-    }
-    return _palette[widget.index % _palette.length];
-  }
-
-  Color get _color {
-    final type = _currentBookingType;
-    if (type == 'doctor') {
-      return ChatPalette.accentBlue;
-    } else if (type == 'counsellor') {
-      return ChatPalette.accentAmber;
-    }
-    return _gradient.last;
+    if (type == 'doctor') return ChatPalette.accentBlue;
+    if (type == 'counsellor') return ChatPalette.accentAmber;
+    return null;
   }
 
   String _initials(String name) =>
@@ -944,45 +1307,39 @@ Hostel: ${s.hostel}
 
   @override
   Widget build(BuildContext context) {
-    // Overlay any temporary local state if it exists
+    final bType = _currentBookingType;
+    final bTime = _currentBookingTime;
+    final isBooked = bType != null && bTime != null;
+
+    // Overlay state onto student model
     final s = widget.student.copyWith(
-      medicalBookingType: _currentBookingType,
-      medicalBookingTime: _currentBookingTime,
+      medicalBookingType: bType,
+      medicalBookingTime: bTime,
+      clearMedicalBooking: !isBooked,
     );
-    final c = _color;
+
+    final bookingColor = _bookingAccentColor;
 
     return Container(
       margin: const EdgeInsets.only(bottom: 8),
       decoration: BoxDecoration(
-        gradient: s.medicalBookingType != null 
-            ? LinearGradient(
-                colors: [
-                  _color.withValues(alpha: 0.45),
-                  ChatPalette.surface,
-                ],
-                begin: Alignment.centerRight,
-                end: Alignment.centerLeft,
-                stops: const [0.0, 0.5], // Fades out by the middle of the card
-              )
-            : null,
-        color: s.medicalBookingType == null ? ChatPalette.surface : null,
+        color: ChatPalette.surface,
         borderRadius: BorderRadius.circular(16),
         border: Border.all(
-          color: _expanded || s.medicalBookingType != null
-              ? _color.withValues(alpha: 0.5) 
-              : ChatPalette.border,
-          width: _expanded || s.medicalBookingType != null ? 1.2 : 1,
+          color: isBooked
+              ? (bookingColor ?? ChatPalette.border)
+              : (_expanded ? ChatPalette.accent.withValues(alpha: 0.45) : ChatPalette.border),
+          width: isBooked ? 1.5 : 1,
         ),
-        boxShadow: _expanded
-            ? [BoxShadow(
-                color: _color.withValues(alpha: 0.18),
-                blurRadius: 24,
-                spreadRadius: 2,
-                offset: Offset(0, 6))]
-            : [BoxShadow(
-                color: Colors.black.withValues(alpha: 0.12),
-                blurRadius: 8,
-                offset: Offset(0, 2))],
+        boxShadow: [
+          BoxShadow(
+            color: isBooked
+                ? (bookingColor?.withValues(alpha: 0.12) ?? Colors.black.withValues(alpha: 0.04))
+                : Colors.black.withValues(alpha: 0.04),
+            blurRadius: isBooked ? 12 : 6,
+            offset: const Offset(0, 2),
+          ),
+        ],
       ),
       child: Column(children: [
         // Main row
@@ -991,69 +1348,75 @@ Hostel: ${s.hostel}
           child: Padding(
             padding: const EdgeInsets.all(12),
             child: Row(children: [
-              // Avatar with gradient
+              // Avatar circle
               GestureDetector(
                 onTap: () {
-                  if (s.profilePhotoBase64 != null || s.photoPath != null) {
-                    showDialog(
-                      context: context,
-                      barrierColor: Colors.black87,
-                      builder: (ctx) => Dialog(
-                        backgroundColor: Colors.transparent,
-                        insetPadding: const EdgeInsets.all(20),
-                        child: Column(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            Align(
-                              alignment: Alignment.topRight,
-                              child: IconButton(
-                                onPressed: () => Navigator.pop(ctx),
-                                icon: const Icon(Icons.close_rounded, color: Colors.white, size: 28),
-                                style: IconButton.styleFrom(backgroundColor: Colors.black54),
-                              ),
-                            ),
-                            Flexible(
-                              child: Container(
-                                width: 240,
-                                height: 240,
-                                decoration: BoxDecoration(
-                                  color: Colors.black26,
-                                  shape: BoxShape.circle,
-                                ),
-                                child: ClipOval(
-                                  child: s.profilePhotoBase64 != null
-                                      ? Image.memory(
-                                          base64Decode(s.profilePhotoBase64!.split(',').last),
-                                          fit: BoxFit.cover,
-                                        )
-                                      : Image.network(s.photoPath!, fit: BoxFit.cover),
-                                ),
-                              ),
-                            ),
-                            const SizedBox(height: 20),
-                          ],
-                        ),
-                      ),
-                    );
+                  final hasPhoto = (s.profilePhotoBase64 != null && s.profilePhotoBase64!.isNotEmpty)
+                      || (s.photoPath != null && s.photoPath!.isNotEmpty);
+                  if (!hasPhoto) return;
+
+                  ImageProvider? imgProvider;
+                  if (s.profilePhotoBase64 != null && s.profilePhotoBase64!.isNotEmpty) {
+                    try {
+                      imgProvider = MemoryImage(base64Decode(s.profilePhotoBase64!.split(',').last));
+                    } catch (_) {}
                   }
+                  imgProvider ??= s.photoPath != null ? NetworkImage(s.photoPath!) : null;
+                  if (imgProvider == null) return;
+
+                  showDialog(
+                    context: context,
+                    barrierColor: Colors.black87,
+                    builder: (ctx) => Dialog(
+                      backgroundColor: Colors.transparent,
+                      insetPadding: const EdgeInsets.all(20),
+                      child: Column(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Align(
+                            alignment: Alignment.topRight,
+                            child: IconButton(
+                              onPressed: () => Navigator.pop(ctx),
+                              icon: const Icon(Icons.close_rounded, color: Colors.white, size: 28),
+                              style: IconButton.styleFrom(backgroundColor: Colors.black54),
+                            ),
+                          ),
+                          Flexible(
+                            child: Container(
+                              width: 240,
+                              height: 240,
+                              decoration: const BoxDecoration(
+                                color: Colors.black26,
+                                shape: BoxShape.circle,
+                              ),
+                              child: ClipOval(
+                                child: Image(
+                                  image: imgProvider!,
+                                  fit: BoxFit.cover,
+                                ),
+                              ),
+                            ),
+                          ),
+                          const SizedBox(height: 20),
+                        ],
+                      ),
+                    ),
+                  );
                 },
                 child: Container(
-                  width: 38,
-                  height: 38,
+                  width: 40,
+                  height: 40,
                   decoration: BoxDecoration(
-                    gradient: LinearGradient(
-                      colors: _gradient,
-                      begin: Alignment.topLeft,
-                      end: Alignment.bottomRight,
-                    ),
+                    color: isBooked
+                        ? (bookingColor?.withValues(alpha: 0.12) ?? ChatPalette.surfaceHigh)
+                        : ChatPalette.surfaceHigh,
                     shape: BoxShape.circle,
-                    boxShadow: [
-                      BoxShadow(
-                        color: _color.withValues(alpha: 0.35),
-                        blurRadius: 10,
-                        offset: Offset(0, 3),
-                      ),
-                    ],
+                    border: Border.all(
+                      color: isBooked
+                          ? (bookingColor?.withValues(alpha: 0.6) ?? ChatPalette.border)
+                          : ChatPalette.borderSoft,
+                      width: isBooked ? 1.5 : 1,
+                    ),
                   ),
                   clipBehavior: Clip.antiAlias,
                   child: _cachedPhotoBytes != null
@@ -1064,263 +1427,297 @@ Hostel: ${s.hostel}
                       : s.photoPath != null
                           ? Image.network(s.photoPath!, fit: BoxFit.cover)
                           : Center(
-                              child: Text(_initials(s.name),
-                                  style: TextStyle(
-                                      color: Colors.white,
-                                      fontSize: 13,
-                                      fontWeight: FontWeight.w900)),
+                              child: Text(
+                                _initials(s.name),
+                                style: TextStyle(
+                                  color: isBooked ? bookingColor : ChatPalette.accent,
+                                  fontSize: 13,
+                                  fontWeight: FontWeight.w800,
+                                ),
+                              ),
                             ),
                 ),
               ),
-              SizedBox(width: 10),
+              const SizedBox(width: 12),
               // Info
               Expanded(
                 child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(s.name,
-                          style: TextStyle(
-                              color: ChatPalette.text,
-                              fontSize: 14,
-                              fontWeight: FontWeight.w700)),
-                      const SizedBox(height: 2),
-                      Text('${s.department} · ${s.semester}',
-                          style: TextStyle(
-                              color: ChatPalette.muted, fontSize: 11)),
-                      const SizedBox(height: 5),
-                      Row(children: [
-                        _Tag(label: s.rollNo, color: c),
-                        const SizedBox(width: 6),
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      s.name,
+                      style: TextStyle(
+                        color: ChatPalette.text,
+                        fontSize: 14,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      '${s.department} · ${s.semester}',
+                      style: TextStyle(
+                        color: ChatPalette.muted,
+                        fontSize: 11,
+                      ),
+                    ),
+                    const SizedBox(height: 5),
+                    Wrap(
+                      spacing: 6,
+                      runSpacing: 4,
+                      children: [
+                        _Tag(
+                          label: s.rollNo,
+                          color: isBooked ? bookingColor! : ChatPalette.accent,
+                        ),
                         _Tag(
                           label: 'Room ${s.roomNo}',
                           color: ChatPalette.accentGreen,
                         ),
-                      ]),
-                    ]),
+                        if (isBooked)
+                          _Tag(
+                            label: s.medicalBookingType == 'counsellor'
+                                ? '● Counselor'
+                                : '● Doctor',
+                            color: bookingColor!,
+                          ),
+                      ],
+                    ),
+                  ],
+                ),
               ),
               // Right side
               Column(
-                  crossAxisAlignment: CrossAxisAlignment.end,
-                  children: [
-                    Text(_timeAgo(s.createdAt),
-                        style: TextStyle(
-                            color: ChatPalette.dim, fontSize: 10)),
-                    SizedBox(height: 6),
-                    AnimatedRotation(
-                      turns: _expanded ? 0.5 : 0,
-                      duration: Duration(milliseconds: 250),
-                      child: Container(
-                        width: 24,
-                        height: 24,
-                        decoration: BoxDecoration(
+                crossAxisAlignment: CrossAxisAlignment.end,
+                children: [
+                  Text(
+                    _timeAgo(s.createdAt),
+                    style: TextStyle(
+                      color: ChatPalette.dim,
+                      fontSize: 10,
+                    ),
+                  ),
+                  const SizedBox(height: 6),
+                  AnimatedRotation(
+                    turns: _expanded ? 0.5 : 0,
+                    duration: const Duration(milliseconds: 250),
+                    child: Container(
+                      width: 24,
+                      height: 24,
+                      decoration: BoxDecoration(
+                        color: _expanded
+                            ? ChatPalette.accent.withValues(alpha: 0.1)
+                            : ChatPalette.surfaceHigh,
+                        borderRadius: BorderRadius.circular(6),
+                        border: Border.all(
                           color: _expanded
-                              ? _color.withValues(alpha: 0.15)
-                              : ChatPalette.surfaceHigh,
-                          borderRadius: BorderRadius.circular(6),
-                          border: Border.all(
-                              color: _expanded
-                                  ? _color.withValues(alpha: 0.4)
-                                  : ChatPalette.border),
+                              ? ChatPalette.accent.withValues(alpha: 0.3)
+                              : ChatPalette.border,
                         ),
-                        child: Icon(Icons.keyboard_arrow_down_rounded,
-                            color: _expanded ? _color : ChatPalette.dim,
-                            size: 16),
+                      ),
+                      child: Icon(
+                        Icons.keyboard_arrow_down_rounded,
+                        color: _expanded ? ChatPalette.accent : ChatPalette.dim,
+                        size: 16,
                       ),
                     ),
-                  ]),
+                  ),
+                ],
+              ),
             ]),
           ),
         ),
+
         // Expanded details
         if (_expanded)
           Container(
             decoration: BoxDecoration(
               color: ChatPalette.canvas,
               borderRadius:
-                  const BorderRadius.vertical(bottom: Radius.circular(20)),
-              border: Border(top: BorderSide(
-                  color: _color.withValues(alpha: 0.2))),
+                  const BorderRadius.vertical(bottom: Radius.circular(16)),
+              border: Border(
+                top: BorderSide(color: ChatPalette.borderSoft),
+              ),
             ),
             padding: const EdgeInsets.all(16),
             child: Column(children: [
               _DetailGrid(student: s),
-              SizedBox(height: 12),
-              // Appointment Section
-              if (s.medicalBookingTime != null) ...[
+              const SizedBox(height: 12),
+
+              // Active Appointment Banner if Booked
+              if (isBooked) ...[
                 Container(
                   width: double.infinity,
                   padding: const EdgeInsets.all(12),
                   decoration: BoxDecoration(
-                    color: _color.withValues(alpha: 0.1),
+                    color: (bookingColor ?? ChatPalette.accentBlue).withValues(alpha: 0.08),
                     borderRadius: BorderRadius.circular(10),
-                    border: Border.all(color: _color.withValues(alpha: 0.3)),
+                    border: Border.all(
+                      color: (bookingColor ?? ChatPalette.accentBlue).withValues(alpha: 0.3),
+                    ),
                   ),
                   child: Row(
                     children: [
                       Icon(
-                        s.medicalBookingType == 'doctor' ? Icons.local_hospital_rounded : Icons.psychology_rounded,
-                        color: _color,
+                        s.medicalBookingType == 'counsellor'
+                            ? Icons.psychology_rounded
+                            : Icons.local_hospital_rounded,
+                        color: bookingColor ?? ChatPalette.accentBlue,
                         size: 20,
                       ),
-                      SizedBox(width: 8),
+                      const SizedBox(width: 8),
                       Expanded(
                         child: Column(
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
                             Text(
-                              'Booked for ${s.medicalBookingType == 'doctor' ? 'Doctor' : 'Counsellor'}',
-                              style: TextStyle(color: _color, fontWeight: FontWeight.bold, fontSize: 13),
+                              'Booked for ${s.medicalBookingType == 'counsellor' ? 'Campus Counselor' : 'Campus Doctor'}',
+                              maxLines: 2,
+                              overflow: TextOverflow.ellipsis,
+                              style: TextStyle(
+                                  color: bookingColor ?? ChatPalette.accentBlue,
+                                  fontWeight: FontWeight.bold,
+                                  fontSize: 13),
                             ),
-                            SizedBox(height: 2),
-                            Text(
-                              'Time: ${s.medicalBookingTime!.toLocal().toString().split('.')[0]}',
-                              style: TextStyle(color: _color.withValues(alpha: 0.8), fontSize: 11),
-                            ),
+                            if (s.medicalBookingTime != null) ...[
+                              const SizedBox(height: 2),
+                              Text(
+                                'Time: ${s.medicalBookingTime!.toLocal().toString().split('.')[0]}',
+                                style: TextStyle(
+                                    color: (bookingColor ?? ChatPalette.accentBlue).withValues(alpha: 0.8),
+                                    fontSize: 11),
+                              ),
+                            ],
                           ],
                         ),
                       ),
                       GestureDetector(
                         onTap: () => _updateBooking(null),
-                        child: Icon(Icons.cancel_rounded, color: _color.withValues(alpha: 0.6), size: 20),
+                        child: Container(
+                          padding: const EdgeInsets.all(4),
+                          decoration: BoxDecoration(
+                            color: (bookingColor ?? ChatPalette.accentBlue).withValues(alpha: 0.15),
+                            borderRadius: BorderRadius.circular(6),
+                          ),
+                          child: Icon(Icons.close_rounded,
+                              color: bookingColor ?? ChatPalette.accentBlue, size: 16),
+                        ),
                       ),
                     ],
                   ),
                 ),
-                SizedBox(height: 12),
-              ] else ...[
-                GestureDetector(
-                  onTap: () {
-                    showModalBottomSheet(
-                      context: context,
-                      backgroundColor: Colors.transparent,
-                      builder: (context) => Container(
-                        padding: const EdgeInsets.all(24),
+                const SizedBox(height: 12),
+              ],
+
+              // Primary Action Buttons Row (Student Record + Book Appointment)
+              Row(
+                children: [
+                  // Button 1: Student Record
+                  Expanded(
+                    child: GestureDetector(
+                      onTap: _openStudentRecord,
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(vertical: 10),
                         decoration: BoxDecoration(
                           color: ChatPalette.surface,
-                          borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
-                        ),
-                        child: Column(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            Text('Choose Appointment Type', style: TextStyle(color: ChatPalette.text, fontSize: 18, fontWeight: FontWeight.w700)),
-                            const SizedBox(height: 24),
-                            Row(
-                              children: [
-                                Expanded(
-                                  child: GestureDetector(
-                                    onTap: () async {
-                                      Navigator.pop(context);
-                                      final notesCtrl = TextEditingController();
-                                      final result = await showDialog<String>(
-                                        context: context,
-                                        builder: (ctx) => AlertDialog(
-                                          backgroundColor: ChatPalette.surface,
-                                          title: const Text('Medical Notes / Symptoms', style: TextStyle(color: Colors.white, fontSize: 16)),
-                                          content: TextField(
-                                            controller: notesCtrl,
-                                            style: const TextStyle(color: Colors.white),
-                                            decoration: InputDecoration(
-                                              hintText: 'Describe symptoms or reason for booking...',
-                                              hintStyle: TextStyle(color: ChatPalette.muted),
-                                              filled: true,
-                                              fillColor: Colors.black26,
-                                            ),
-                                            maxLines: 3,
-                                          ),
-                                          actions: [
-                                            TextButton(
-                                              onPressed: () => Navigator.pop(ctx),
-                                              child: Text('Cancel', style: TextStyle(color: ChatPalette.muted)),
-                                            ),
-                                            ElevatedButton(
-                                              onPressed: () => Navigator.pop(ctx, notesCtrl.text),
-                                              style: ElevatedButton.styleFrom(backgroundColor: ChatPalette.accentBlue),
-                                              child: const Text('Book', style: TextStyle(color: Colors.white)),
-                                            ),
-                                          ],
-                                        ),
-                                      );
-                                      if (result != null) {
-                                        _updateBooking('doctor', notes: result);
-                                      }
-                                    },
-                                    child: Container(
-                                      padding: const EdgeInsets.symmetric(vertical: 16),
-                                      decoration: BoxDecoration(
-                                        color: ChatPalette.accentBlue.withValues(alpha: 0.1),
-                                        borderRadius: BorderRadius.circular(16),
-                                        border: Border.all(color: ChatPalette.accentBlue.withValues(alpha: 0.3)),
-                                      ),
-                                      child: Column(
-                                        children: [
-                                          Icon(Icons.medical_services_outlined, color: ChatPalette.accentBlue, size: 32),
-                                          const SizedBox(height: 8),
-                                          Text('Doctor', style: TextStyle(color: ChatPalette.accentBlue, fontSize: 14, fontWeight: FontWeight.bold)),
-                                        ],
-                                      ),
-                                    ),
-                                  ),
-                                ),
-                                const SizedBox(width: 16),
-                                Expanded(
-                                  child: GestureDetector(
-                                    onTap: () {
-                                      Navigator.pop(context);
-                                      _updateBooking('counsellor');
-                                    },
-                                    child: Container(
-                                      padding: const EdgeInsets.symmetric(vertical: 16),
-                                      decoration: BoxDecoration(
-                                        color: ChatPalette.accentAmber.withValues(alpha: 0.1),
-                                        borderRadius: BorderRadius.circular(16),
-                                        border: Border.all(color: ChatPalette.accentAmber.withValues(alpha: 0.3)),
-                                      ),
-                                      child: Column(
-                                        children: [
-                                          Icon(Icons.psychology_outlined, color: ChatPalette.accentAmber, size: 32),
-                                          const SizedBox(height: 8),
-                                          Text('Counsellor', style: TextStyle(color: ChatPalette.accentAmber, fontSize: 14, fontWeight: FontWeight.bold)),
-                                        ],
-                                      ),
-                                    ),
-                                  ),
-                                ),
-                              ],
+                          borderRadius: BorderRadius.circular(10),
+                          border: Border.all(
+                            color: ChatPalette.accent.withValues(alpha: 0.4),
+                          ),
+                          boxShadow: [
+                            BoxShadow(
+                              color: Colors.black.withValues(alpha: 0.03),
+                              blurRadius: 6,
+                              offset: const Offset(0, 2),
                             ),
-                            const SizedBox(height: 32),
+                          ],
+                        ),
+                        child: Row(
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          children: [
+                            Icon(Icons.folder_shared_rounded,
+                                color: ChatPalette.accent, size: 15),
+                            const SizedBox(width: 6),
+                            Text(
+                              'Student Record',
+                              style: TextStyle(
+                                color: ChatPalette.accent,
+                                fontSize: 12,
+                                fontWeight: FontWeight.w700,
+                              ),
+                            ),
                           ],
                         ),
                       ),
-                    );
-                  },
-                  child: Container(
-                    width: double.infinity,
-                    padding: const EdgeInsets.symmetric(vertical: 10),
-                    decoration: BoxDecoration(
-                      color: ChatPalette.accentBlue.withValues(alpha: 0.1),
-                      borderRadius: BorderRadius.circular(10),
-                      border: Border.all(color: ChatPalette.accentBlue.withValues(alpha: 0.3)),
-                      boxShadow: [
-                        BoxShadow(
-                          color: ChatPalette.accentBlue.withValues(alpha: 0.12),
-                          blurRadius: 8,
-                          offset: const Offset(0, 3),
-                        )
-                      ],
                     ),
-                    child: Row(mainAxisAlignment: MainAxisAlignment.center, children: [
-                      Icon(Icons.medical_services_outlined, color: ChatPalette.accentBlue, size: 16),
-                      const SizedBox(width: 8),
-                      Text('Book Medical or Counsellor Appointment',
-                          style: TextStyle(
-                              color: ChatPalette.accentBlue,
-                              fontSize: 13,
-                              fontWeight: FontWeight.w700)),
-                    ]),
                   ),
-                ),
-                SizedBox(height: 12),
-              ],
+                  const SizedBox(width: 8),
+
+                  // Button 2: Book for Doctor & Counselor / Cancel Booking
+                  Expanded(
+                    child: GestureDetector(
+                      onTap: () {
+                        if (isBooked) {
+                          _updateBooking(null);
+                        } else {
+                          _showBookingSheet();
+                        }
+                      },
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(vertical: 10),
+                        decoration: BoxDecoration(
+                          color: isBooked
+                              ? ChatPalette.accentRose.withValues(alpha: 0.08)
+                              : ChatPalette.accentBlue.withValues(alpha: 0.08),
+                          borderRadius: BorderRadius.circular(10),
+                          border: Border.all(
+                            color: isBooked
+                                ? ChatPalette.accentRose.withValues(alpha: 0.4)
+                                : ChatPalette.accentBlue.withValues(alpha: 0.4),
+                          ),
+                          boxShadow: [
+                            BoxShadow(
+                              color: (isBooked ? ChatPalette.accentRose : ChatPalette.accentBlue)
+                                  .withValues(alpha: 0.08),
+                              blurRadius: 6,
+                              offset: const Offset(0, 2),
+                            ),
+                          ],
+                        ),
+                        child: Row(
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          children: [
+                            Icon(
+                              isBooked
+                                  ? Icons.cancel_outlined
+                                  : Icons.medical_services_outlined,
+                              color: isBooked
+                                  ? ChatPalette.accentRose
+                                  : ChatPalette.accentBlue,
+                              size: 15,
+                            ),
+                            const SizedBox(width: 6),
+                            Text(
+                              isBooked
+                                  ? 'Cancel Booking'
+                                  : 'Book for Doctor & Counselor',
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: TextStyle(
+                                color: isBooked
+                                    ? ChatPalette.accentRose
+                                    : ChatPalette.accentBlue,
+                                fontSize: 11.5,
+                                fontWeight: FontWeight.w700,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 10),
               // Action buttons
               Row(children: [
                 Expanded(
@@ -1385,6 +1782,8 @@ class _Tag extends StatelessWidget {
           ],
         ),
         child: Text(label,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
             style: TextStyle(
                 color: color,
                 fontSize: 9,
@@ -1497,7 +1896,7 @@ class _EmptyList extends StatelessWidget {
           Text('No students found',
               style: TextStyle(
                   color: ChatPalette.text,
-                  fontSize: 16,
+                  fontSize: 14,
                   fontWeight: FontWeight.w700)),
           SizedBox(height: 6),
           Text('Try a different search or filter',

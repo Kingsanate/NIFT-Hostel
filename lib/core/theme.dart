@@ -29,7 +29,7 @@ abstract final class AppTheme {
         ),
         titleTextStyle: TextStyle(
           color: Pal.text,
-          fontSize: 18,
+          fontSize: 15,
           fontWeight: FontWeight.w700,
           letterSpacing: -0.3,
         ),
@@ -82,7 +82,7 @@ abstract final class AppTheme {
           elevation: 0,
           textStyle: const TextStyle(
             fontWeight: FontWeight.w700,
-            fontSize: 15,
+            fontSize: 13,
             letterSpacing: 0.2,
           ),
         ),

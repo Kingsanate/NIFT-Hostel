@@ -1,7 +1,9 @@
 import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:hive_flutter/hive_flutter.dart';
-import 'package:supabase_flutter/supabase_flutter.dart';
+import 'package:http/http.dart' as http;
+import 'dart:convert';
+import '../services/api_service.dart';
 
 class AppConfigState {
   final String appName;
@@ -11,13 +13,13 @@ class AppConfigState {
   final String scannerPrompt;
   final List<String> activeKeys;
 
-  /// Keys are intentionally empty — they are loaded from the Supabase
+  /// Keys are intentionally empty — they are loaded from the backend
   /// `app_config` table at runtime. Never hardcode secrets here.
   AppConfigState({
     this.appName = 'NIFT Hostel Shillong',
     this.appSubtitle = 'NIFT Hostel Shillong',
     this.groqChatKey = '',
-    this.chatPrompt = '',
+    this.chatPrompt = 'You are the friendly and professional NIFT Hostel AI Assistant. Always be concise, helpful, and polite.',
     this.scannerPrompt = '',
     this.activeKeys = const [],
   });
@@ -45,10 +47,9 @@ class AppConfigState {
 class ConfigNotifier extends Notifier<AppConfigState> {
   @override
   AppConfigState build() {
-    // Start background fetch async
-    Future.microtask(() => _fetchFromSupabase());
-    
-    // Return the cached state immediately for instant boot
+    // Start background fetch from Oracle backend (async, non-blocking)
+    Future.microtask(() => _fetchFromOracle());
+    // Return cached state immediately for instant boot
     return _loadFromCache();
   }
 
@@ -72,22 +73,35 @@ class ConfigNotifier extends Notifier<AppConfigState> {
     return initialState;
   }
 
-  Future<void> _fetchFromSupabase() async {
+  Future<void> _fetchFromOracle() async {
     try {
-      final res = await Supabase.instance.client.from('app_config').select().limit(1);
-      if (res.isNotEmpty) {
-        final data = res.first;
-        
+      // Fetch config directly from our Oracle self-hosted backend
+      // Config endpoint is now auth-protected; send the stored JWT if present
+      final token = await ApiService.getAuthToken();
+      final response = await http.get(
+        Uri.parse('${ApiService.baseUrl}/hostels/config'),
+        headers: {
+          'Content-Type': 'application/json',
+          if (token != null && token.isNotEmpty) 'Authorization': 'Bearer $token',
+        },
+      ).timeout(const Duration(seconds: 8));
+
+      if (response.statusCode == 200) {
+        final body = jsonDecode(response.body);
+        final data = body['config'] as Map<String, dynamic>? ?? {};
+
         List<String> dynamicKeys = [];
-        if (data['gemini_chat_key'] != null && data['gemini_chat_key'].toString().isNotEmpty && data['gemini_chat_key'] != 'YOUR_CHAT_API_KEY_HERE') {
-          dynamicKeys.add(data['gemini_chat_key']);
+        final geminiKey = data['gemini_chat_key']?.toString().trim() ?? '';
+        final geminiScannerKey = data['gemini_scanner_key']?.toString().trim() ?? '';
+        if (geminiKey.isNotEmpty && geminiKey != 'YOUR_CHAT_API_KEY_HERE') {
+          dynamicKeys.add(geminiKey);
         }
-        if (data['gemini_scanner_key'] != null && data['gemini_scanner_key'].toString().isNotEmpty && data['gemini_scanner_key'] != 'YOUR_SCANNER_API_KEY_HERE') {
-          if (!dynamicKeys.contains(data['gemini_scanner_key'])) {
-            dynamicKeys.add(data['gemini_scanner_key']);
-          }
+        if (geminiScannerKey.isNotEmpty &&
+            geminiScannerKey != 'YOUR_SCANNER_API_KEY_HERE' &&
+            !dynamicKeys.contains(geminiScannerKey)) {
+          dynamicKeys.add(geminiScannerKey);
         }
-        
+        // Preserve any existing keys not returned from Oracle
         for (var k in state.activeKeys) {
           if (!dynamicKeys.contains(k)) dynamicKeys.add(k);
         }
@@ -103,7 +117,7 @@ class ConfigNotifier extends Notifier<AppConfigState> {
 
         state = newState;
 
-        // Cache the updated state in Hive for offline use
+        // Cache in Hive for offline use
         final box = Hive.box('appConfig');
         await box.putAll({
           'app_name': newState.appName,
@@ -115,7 +129,8 @@ class ConfigNotifier extends Notifier<AppConfigState> {
         });
       }
     } catch (e) {
-      debugPrint('Failed to load dynamic config from Supabase: $e');
+      // Non-fatal: use Hive cache if Oracle is unreachable
+      debugPrint('Failed to load config from Oracle backend: $e');
     }
   }
 }

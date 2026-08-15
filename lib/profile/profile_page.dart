@@ -1,6 +1,7 @@
+import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:flutter_animate/flutter_animate.dart';
-import 'package:supabase_flutter/supabase_flutter.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import '../chat/chat_palette.dart';
 import '../auth/login_page.dart';
 
@@ -21,20 +22,25 @@ class _ProfilePageState extends State<ProfilePage> {
   @override
   void initState() {
     super.initState();
+    _nameController = TextEditingController(text: 'Admin');
+    _phoneController = TextEditingController(text: '+91 9876543210');
+    _emailController = TextEditingController(text: 'warden@nift.ac.in');
+    _loadUser();
+  }
 
-    // Populate fields from the currently signed-in Supabase user
-    final user = Supabase.instance.client.auth.currentUser;
-    final meta = user?.userMetadata ?? {};
-
-    _nameController = TextEditingController(
-      text: meta['full_name']?.toString() ?? meta['name']?.toString() ?? '',
-    );
-    _phoneController = TextEditingController(
-      text: meta['phone']?.toString() ?? '',
-    );
-    _emailController = TextEditingController(
-      text: user?.email ?? '',
-    );
+  Future<void> _loadUser() async {
+    final prefs = await SharedPreferences.getInstance();
+    final userJson = prefs.getString('user_data');
+    if (userJson != null) {
+      try {
+        final data = jsonDecode(userJson);
+        setState(() {
+          _nameController.text = data['name'] ?? data['username'] ?? 'Admin';
+          _phoneController.text = data['phone'] ?? '';
+          _emailController.text = data['email'] ?? 'warden@nift.ac.in';
+        });
+      } catch (_) {}
+    }
   }
 
   @override
@@ -58,14 +64,13 @@ class _ProfilePageState extends State<ProfilePage> {
     setState(() => _isSaving = true);
 
     try {
-      await Supabase.instance.client.auth.updateUser(
-        UserAttributes(
-          data: {
-            'full_name': _nameController.text.trim(),
-            'phone': _phoneController.text.trim(),
-          },
-        ),
-      );
+      final prefs = await SharedPreferences.getInstance();
+      final userObj = {
+        'name': _nameController.text.trim(),
+        'phone': _phoneController.text.trim(),
+        'email': _emailController.text.trim(),
+      };
+      await prefs.setString('user_data', jsonEncode(userObj));
 
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -79,11 +84,11 @@ class _ProfilePageState extends State<ProfilePage> {
         );
         Navigator.pop(context);
       }
-    } on AuthException catch (e) {
+    } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text(e.message,
+            content: Text(e.toString(),
                 style: const TextStyle(fontWeight: FontWeight.w700)),
             backgroundColor: ChatPalette.accentRose,
             behavior: SnackBarBehavior.floating,
@@ -128,17 +133,21 @@ class _ProfilePageState extends State<ProfilePage> {
     );
 
     if (confirmed == true && mounted) {
-      Navigator.of(context).pushAndRemoveUntil(
-        PageRouteBuilder(
-          pageBuilder: (ctx, anim, secondary) => const LoginPage(),
-          transitionsBuilder: (ctx, anim, secondary, child) =>
-              FadeTransition(opacity: anim, child: child),
-          transitionDuration: const Duration(milliseconds: 500),
-        ),
-        (_) => false,
-      );
-      // Trigger network sign out in background for immediate UI response
-      Supabase.instance.client.auth.signOut();
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.remove('auth_token');
+      await prefs.remove('user_data');
+
+      if (mounted) {
+        Navigator.of(context).pushAndRemoveUntil(
+          PageRouteBuilder(
+            pageBuilder: (ctx, anim, secondary) => const LoginPage(),
+            transitionsBuilder: (ctx, anim, secondary, child) =>
+                FadeTransition(opacity: anim, child: child),
+            transitionDuration: const Duration(milliseconds: 250),
+          ),
+          (_) => false,
+        );
+      }
     }
   }
 
@@ -172,7 +181,7 @@ class _ProfilePageState extends State<ProfilePage> {
                   Text('My Profile',
                       style: TextStyle(
                           color: ChatPalette.text,
-                          fontSize: 22,
+                          fontSize: 17,
                           fontWeight: FontWeight.w900,
                           letterSpacing: -0.5)),
                   const Spacer(),
@@ -244,7 +253,7 @@ class _ProfilePageState extends State<ProfilePage> {
                                 style: const TextStyle(
                                     color: Colors.white,
                                     fontWeight: FontWeight.w900,
-                                    fontSize: 38),
+                                    fontSize: 16),
                               ),
                             ),
                           ),
@@ -371,7 +380,7 @@ class _ProfilePageState extends State<ProfilePage> {
                                 'Save Changes',
                                 style: TextStyle(
                                     color: Colors.white,
-                                    fontSize: 16,
+                                    fontSize: 14,
                                     fontWeight: FontWeight.w900),
                               ),
                       ),
@@ -444,7 +453,7 @@ class _BuildTextField extends StatelessWidget {
                   keyboardType: keyboardType,
                   style: TextStyle(
                       color: readOnly ? ChatPalette.dim : ChatPalette.text,
-                      fontSize: 15,
+                      fontSize: 13,
                       fontWeight: FontWeight.w700),
                   decoration: InputDecoration(
                     border: InputBorder.none,

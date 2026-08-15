@@ -1,7 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_animate/flutter_animate.dart';
 import 'package:shared_preferences/shared_preferences.dart';
-import 'package:supabase_flutter/supabase_flutter.dart';
 import '../chat/chat_palette.dart';
 import '../auth/login_page.dart';
 
@@ -71,7 +70,7 @@ class _SettingsPageState extends State<SettingsPage> {
                   Text('Settings',
                       style: TextStyle(
                           color: ChatPalette.text,
-                          fontSize: 22,
+                          fontSize: 17,
                           fontWeight: FontWeight.w900,
                           letterSpacing: -0.5)),
                 ],
@@ -149,18 +148,22 @@ class _SettingsPageState extends State<SettingsPage> {
                         ),
                       );
                       if (confirmed == true && context.mounted) {
-                        Navigator.of(context).pushAndRemoveUntil(
-                          PageRouteBuilder(
-                            pageBuilder: (ctx, anim, secondary) => const LoginPage(),
-                            transitionsBuilder: (ctx, anim, secondary, child) =>
-                                FadeTransition(opacity: anim, child: child),
-                            transitionDuration:
-                                const Duration(milliseconds: 500),
-                          ),
-                          (_) => false,
-                        );
-                        // Trigger network sign out in background for immediate UI response
-                        Supabase.instance.client.auth.signOut();
+                        final prefs = await SharedPreferences.getInstance();
+                        await prefs.remove('auth_token');
+                        await prefs.remove('user_data');
+
+                        if (context.mounted) {
+                          Navigator.of(context).pushAndRemoveUntil(
+                            PageRouteBuilder(
+                              pageBuilder: (ctx, anim, secondary) => const LoginPage(),
+                              transitionsBuilder: (ctx, anim, secondary, child) =>
+                                  FadeTransition(opacity: anim, child: child),
+                              transitionDuration:
+                                  const Duration(milliseconds: 250),
+                            ),
+                            (_) => false,
+                          );
+                        }
                       }
                     },
                     child: Container(
@@ -175,7 +178,7 @@ class _SettingsPageState extends State<SettingsPage> {
                         child: Text('Sign Out',
                             style: TextStyle(
                                 color: ChatPalette.accentRose,
-                                fontSize: 15,
+                                fontSize: 13,
                                 fontWeight: FontWeight.w900)),
                       ),
                     ),
@@ -239,7 +242,7 @@ class _SettingsSwitch extends StatelessWidget {
                 Text(title,
                     style: TextStyle(
                         color: ChatPalette.text,
-                        fontSize: 15,
+                        fontSize: 13,
                         fontWeight: FontWeight.w800)),
                 SizedBox(height: 2),
                 Text(subtitle,

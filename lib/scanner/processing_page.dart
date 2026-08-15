@@ -3,7 +3,7 @@ import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:flutter_animate/flutter_animate.dart';
 import '../chat/chat_palette.dart';
-import 'package:supabase_flutter/supabase_flutter.dart';
+import '../services/api_service.dart';
 import 'models/student_model.dart';
 import 'services/extraction_service.dart';
 import '../main.dart'; // For AppConfig
@@ -95,7 +95,7 @@ class _ProcessingPageState extends State<ProcessingPage> {
 
       if (!mounted) return;
 
-      String prefix = widget.selectedHostel.contains('Girls') ? 'GH-' : 'BH-';
+      String prefix = widget.selectedHostel.contains('Nongthymmai') ? 'NG-' : widget.selectedHostel.contains('Girls') ? 'GH-' : 'BH-';
       parsedData = parsedData.copyWith(roomNo: prefix);
 
       setState(() {
@@ -128,7 +128,7 @@ class _ProcessingPageState extends State<ProcessingPage> {
       debugPrint('Unexpected error in processing: $e');
       if (!mounted) return;
       // Never pop the page! Fallback to editing form so user can input data.
-      String prefix = widget.selectedHostel.contains('Girls') ? 'GH-' : 'BH-';
+      String prefix = widget.selectedHostel.contains('Nongthymmai') ? 'NG-' : widget.selectedHostel.contains('Girls') ? 'GH-' : 'BH-';
       final fallbackStudent = StudentModel.demoExtracted(
         photoPath: widget.imagePath,
         hostel: widget.selectedHostel,
@@ -286,7 +286,7 @@ class _AnalyzingView extends StatelessWidget {
         Text('Reading Form',
             style: TextStyle(
                 color: ChatPalette.text,
-                fontSize: 17,
+                fontSize: 14,
                 fontWeight: FontWeight.w700)),
         SizedBox(height: 6),
         Text(
@@ -364,7 +364,9 @@ class _EditableFormViewState extends State<_EditableFormView> {
     // Auto-prefix room number based on hostel
     String initialRoom = s.roomNo;
     if (initialRoom.isEmpty || initialRoom == 'Pending') {
-      if (s.hostel.toLowerCase().contains('boy')) {
+      if (s.hostel.toLowerCase().contains('nongthymmai')) {
+        initialRoom = 'NG-';
+      } else if (s.hostel.toLowerCase().contains('boy')) {
         initialRoom = 'BH-';
       } else if (s.hostel.toLowerCase().contains('girl')) {
         initialRoom = 'GH-';
@@ -418,7 +420,8 @@ class _EditableFormViewState extends State<_EditableFormView> {
     );
     
     try {
-      final existing = await Supabase.instance.client.from('students').select('id').eq('rollNo', updated.rollNo).limit(1);
+      final allStudents = await ApiService.fetchStudents();
+      final existing = allStudents.where((s) => (s['rollNo'] ?? s['roll_no'] ?? '').toString().trim().toUpperCase() == updated.rollNo.trim().toUpperCase()).toList();
       if (existing.isNotEmpty) {
         if (!mounted) return;
         ScaffoldMessenger.of(context).showSnackBar(
@@ -439,30 +442,27 @@ class _EditableFormViewState extends State<_EditableFormView> {
         return;
       }
 
-      Map<String, dynamic> payload = updated.toSupabase();
-      Map<String, dynamic>? insertedData;
-
-      try {
-        insertedData = await Supabase.instance.client
-            .from('students')
-            .insert(payload)
-            .select()
-            .single();
-      } catch (firstError) {
-        debugPrint('Primary insert failed: $firstError. Retrying with fallback payload...');
-        // Retry without photo data in case photo column or payload size caused Bad Request
-        final fallbackPayload = Map<String, dynamic>.from(payload);
-        fallbackPayload.remove('profilePhotoBase64');
-        fallbackPayload.remove('photoPath');
-        
-        insertedData = await Supabase.instance.client
-            .from('students')
-            .insert(fallbackPayload)
-            .select()
-            .single();
+      String? finalPhotoPath = updated.photoPath;
+      if (updated.profilePhotoBase64 != null && updated.profilePhotoBase64!.isNotEmpty) {
+        try {
+          final res = await ApiService.uploadFacePhoto(
+            base64Image: updated.profilePhotoBase64!,
+            rollNo: updated.rollNo,
+          );
+          if (res['url'] != null) {
+            finalPhotoPath = res['url'];
+          }
+        } catch (e) {
+          debugPrint('Failed to upload face: $e');
+        }
       }
 
-      final finalStudent = StudentModel.fromSupabase(insertedData, updated.hostel);
+      final studentToSave = updated.copyWith(photoPath: finalPhotoPath, profilePhotoBase64: null);
+      Map<String, dynamic> payload = studentToSave.toBackend();
+      
+      final res = await ApiService.createStudent(payload);
+      final insertedData = res['student'] ?? payload;
+      final finalStudent = StudentModel.fromBackend(insertedData, updated.hostel);
       
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
@@ -590,7 +590,7 @@ class _EditableFormViewState extends State<_EditableFormView> {
                               child: Text(initials,
                                   style: TextStyle(
                                       color: ChatPalette.accent,
-                                      fontSize: 20,
+                                      fontSize: 14,
                                       fontWeight: FontWeight.bold))),
                     ),
                   ),
@@ -603,7 +603,7 @@ class _EditableFormViewState extends State<_EditableFormView> {
                         Text(_nameCtrl.text,
                             style: TextStyle(
                                 color: ChatPalette.text,
-                                fontSize: 18,
+                                fontSize: 15,
                                 fontWeight: FontWeight.w800),
                             maxLines: 2,
                             overflow: TextOverflow.ellipsis),

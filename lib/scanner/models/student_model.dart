@@ -11,10 +11,18 @@ class StudentModel {
   final String emailId;
   final String roomNo;
   final String hostel;
-  final String? photoPath; // local path or Supabase URL
+  final String? photoPath; // local path or CDN URL
   final String? profilePhotoBase64; // Extracted base64 face crop
   final String? medicalBookingType; // 'doctor' or 'counsellor'
   final DateTime? medicalBookingTime; 
+  final String? joiningDate;
+  final String? exitDate;
+  final String? bloodGroup;
+  final String? emergencyContact;
+  final String? guardianName;
+  final String? guardianPhone;
+  final String? address;
+  final String? notes;
   final DateTime createdAt;
 
   const StudentModel({
@@ -33,6 +41,14 @@ class StudentModel {
     this.profilePhotoBase64,
     this.medicalBookingType,
     this.medicalBookingTime,
+    this.joiningDate,
+    this.exitDate,
+    this.bloodGroup,
+    this.emergencyContact,
+    this.guardianName,
+    this.guardianPhone,
+    this.address,
+    this.notes,
     required this.createdAt,
   });
 
@@ -52,6 +68,15 @@ class StudentModel {
     String? profilePhotoBase64,
     String? medicalBookingType,
     DateTime? medicalBookingTime,
+    bool clearMedicalBooking = false,
+    String? joiningDate,
+    String? exitDate,
+    String? bloodGroup,
+    String? emergencyContact,
+    String? guardianName,
+    String? guardianPhone,
+    String? address,
+    String? notes,
     DateTime? createdAt,
   }) {
     return StudentModel(
@@ -68,8 +93,16 @@ class StudentModel {
       hostel: hostel ?? this.hostel,
       photoPath: photoPath ?? this.photoPath,
       profilePhotoBase64: profilePhotoBase64 ?? this.profilePhotoBase64,
-      medicalBookingType: medicalBookingType ?? this.medicalBookingType,
-      medicalBookingTime: medicalBookingTime ?? this.medicalBookingTime,
+      medicalBookingType: clearMedicalBooking ? null : (medicalBookingType ?? this.medicalBookingType),
+      medicalBookingTime: clearMedicalBooking ? null : (medicalBookingTime ?? this.medicalBookingTime),
+      joiningDate: joiningDate ?? this.joiningDate,
+      exitDate: exitDate ?? this.exitDate,
+      bloodGroup: bloodGroup ?? this.bloodGroup,
+      emergencyContact: emergencyContact ?? this.emergencyContact,
+      guardianName: guardianName ?? this.guardianName,
+      guardianPhone: guardianPhone ?? this.guardianPhone,
+      address: address ?? this.address,
+      notes: notes ?? this.notes,
       createdAt: createdAt ?? this.createdAt,
     );
   }
@@ -108,16 +141,24 @@ class StudentModel {
       contactNo: json['contactNo']?.toString() ?? json['phone']?.toString() ?? '',
       emailId: json['emailId']?.toString() ?? '',
       roomNo: json['roomNo']?.toString() ?? json['room']?.toString() ?? '',
-      hostel: json['hostel']?.toString() ?? '',
+      hostel: json['hostel']?.toString() ?? json['hostelId']?.toString() ?? '',
       photoPath: json['photoPath']?.toString(),
       profilePhotoBase64: json['profilePhotoBase64']?.toString(),
       medicalBookingType: json['medicalBookingType']?.toString(),
       medicalBookingTime: DateTime.tryParse(json['medicalBookingTime']?.toString() ?? ''),
+      joiningDate: json['joiningDate']?.toString() ?? json['joining_date']?.toString(),
+      exitDate: json['exitDate']?.toString() ?? json['exit_date']?.toString(),
+      bloodGroup: json['bloodGroup']?.toString() ?? json['blood_group']?.toString(),
+      emergencyContact: json['emergencyContact']?.toString() ?? json['emergency_contact']?.toString(),
+      guardianName: json['guardianName']?.toString() ?? json['guardian_name']?.toString(),
+      guardianPhone: json['guardianPhone']?.toString() ?? json['guardian_phone']?.toString(),
+      address: json['address']?.toString(),
+      notes: json['notes']?.toString(),
       createdAt: DateTime.tryParse(json['created_at']?.toString() ?? '') ?? DateTime.now(),
     );
   }
 
-  factory StudentModel.fromSupabase(Map<String, dynamic> json, String hostel) {
+  factory StudentModel.fromBackend(Map<String, dynamic> json, String hostel) {
     return StudentModel(
       id: json['id']?.toString() ?? '',
       name: json['name']?.toString() ?? '',
@@ -134,6 +175,14 @@ class StudentModel {
       profilePhotoBase64: json['profilePhotoBase64']?.toString(),
       medicalBookingType: json['medicalBookingType']?.toString(),
       medicalBookingTime: DateTime.tryParse(json['medicalBookingTime']?.toString() ?? ''),
+      joiningDate: json['joiningDate']?.toString() ?? json['joining_date']?.toString(),
+      exitDate: json['exitDate']?.toString() ?? json['exit_date']?.toString(),
+      bloodGroup: json['bloodGroup']?.toString() ?? json['blood_group']?.toString(),
+      emergencyContact: json['emergencyContact']?.toString() ?? json['emergency_contact']?.toString(),
+      guardianName: json['guardianName']?.toString() ?? json['guardian_name']?.toString(),
+      guardianPhone: json['guardianPhone']?.toString() ?? json['guardian_phone']?.toString(),
+      address: json['address']?.toString(),
+      notes: json['notes']?.toString(),
       createdAt: DateTime.tryParse(json['created_at']?.toString() ?? '') ?? DateTime.now(),
     );
   }
@@ -149,8 +198,14 @@ class StudentModel {
       'gender': gender,
       'contactNo': contactNo,
       'emailId': emailId,
-      'guardianName': '', // Passed as empty string to prevent breaking old DB schema
-      'address': '',      // Passed as empty string to prevent breaking old DB schema
+      'guardianName': guardianName ?? '',
+      'guardianPhone': guardianPhone ?? '',
+      'address': address ?? '',
+      'joiningDate': joiningDate ?? '',
+      'exitDate': exitDate ?? '',
+      'bloodGroup': bloodGroup ?? '',
+      'emergencyContact': emergencyContact ?? '',
+      'notes': notes ?? '',
       'roomNo': roomNo,
       'hostel': hostel,
       'photoPath': photoPath,
@@ -261,7 +316,7 @@ class StudentModel {
     return null;
   }
 
-  Map<String, dynamic> toSupabase() {
+  Map<String, dynamic> toBackend() {
     final formattedDob = formatDobForPostgres(dateOfBirth);
 
     String hId = 'boys_hostel'; // default
@@ -291,15 +346,53 @@ class StudentModel {
       data['dateOfBirth'] = formattedDob;
     }
 
-    if (profilePhotoBase64 != null && profilePhotoBase64!.isNotEmpty) {
-      data['profilePhotoBase64'] = profilePhotoBase64;
-    } else if (photoPath != null && photoPath!.isNotEmpty && photoPath!.startsWith('http')) {
+    if (joiningDate != null && joiningDate!.isNotEmpty) {
+      data['joiningDate'] = joiningDate;
+    }
+
+    if (exitDate != null && exitDate!.isNotEmpty) {
+      data['exitDate'] = exitDate;
+    }
+
+    if (bloodGroup != null && bloodGroup!.isNotEmpty) {
+      data['bloodGroup'] = bloodGroup;
+    }
+
+    if (emergencyContact != null && emergencyContact!.isNotEmpty) {
+      data['emergencyContact'] = emergencyContact;
+    }
+
+    if (guardianName != null && guardianName!.isNotEmpty) {
+      data['guardianName'] = guardianName;
+    }
+
+    if (guardianPhone != null && guardianPhone!.isNotEmpty) {
+      data['guardianPhone'] = guardianPhone;
+    }
+
+    if (address != null && address!.isNotEmpty) {
+      data['address'] = address;
+    }
+
+    if (notes != null && notes!.isNotEmpty) {
+      data['notes'] = notes;
+    }
+
+    if (photoPath != null && photoPath!.isNotEmpty) {
       data['photoPath'] = photoPath;
     }
 
     if (medicalBookingType != null) {
       data['medicalBookingType'] = medicalBookingType;
       data['medicalBookingTime'] = medicalBookingTime?.toIso8601String();
+    }
+
+    if (profilePhotoBase64 != null) {
+      data['profilePhotoBase64'] = profilePhotoBase64;
+    }
+
+    if (id.isNotEmpty && !id.startsWith('STU')) {
+      data['id'] = id;
     }
 
     return data;

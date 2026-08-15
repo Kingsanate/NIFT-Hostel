@@ -1,14 +1,14 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_animate/flutter_animate.dart';
 import 'package:intl/intl.dart';
-import 'package:supabase_flutter/supabase_flutter.dart';
 import 'dart:async';
 import 'dart:convert';
 import 'medical_history_page.dart';
 import 'medical_reports_page.dart';
 import 'medical_profile_page.dart';
 import '../auth/login_page.dart';
-import '../chat/chat_palette.dart'; // Just in case, though we will use custom colors
+import '../services/api_service.dart';
+import '../services/websocket_service.dart';
 
 class MedicalDashboardPage extends StatefulWidget {
   final String role; // 'Doctor' or 'Counsellor'
@@ -24,51 +24,53 @@ class _MedicalDashboardPageState extends State<MedicalDashboardPage> {
 
   List<Map<String, dynamic>> _waitingAppointments = [];
   int _treatedCount = 0;
-  StreamSubscription? _waitingSub;
-  StreamSubscription? _completedSub;
+  StreamSubscription? _wsSubscription;
 
   @override
   void initState() {
     super.initState();
+    _fetchAppointments();
     
-    // Stream for Waiting Appointments
-    _waitingSub = Supabase.instance.client
-        .from('medical_appointments')
-        .stream(primaryKey: ['id'])
-        .order('created_at', ascending: true)
-        .listen((data) {
-      if (mounted) {
-        setState(() {
-          _waitingAppointments = data.where((r) => r['status'] == 'waiting').toList();
-        });
-      }
-    });
-
-    // We can also fetch the completed ones for today to show the "Treated" stat
-    final todayStr = DateTime.now().toIso8601String().substring(0, 10); // YYYY-MM-DD
-    _completedSub = Supabase.instance.client
-        .from('medical_appointments')
-        .stream(primaryKey: ['id'])
-        .eq('status', 'completed')
-        .listen((data) {
-      if (mounted) {
-        int countToday = 0;
-        for (var item in data) {
-          if (item['completed_at'] != null && item['completed_at'].toString().startsWith(todayStr)) {
-            countToday++;
-          }
-        }
-        setState(() {
-          _treatedCount = countToday;
-        });
+    // Live WebSocket Stream for instant appointments
+    _wsSubscription = WebSocketService.instance.events.listen((event) {
+      if (event['type'] == 'MEDICAL_CHANGED') {
+        _fetchAppointments();
       }
     });
   }
 
+  Future<void> _fetchAppointments() async {
+    try {
+      final list = await ApiService.fetchMedicalAppointments();
+      if (mounted) {
+        final roleType = widget.role.toLowerCase();
+        final waiting = list.where((apt) {
+          final s = (apt['status'] ?? 'pending').toString().toLowerCase();
+          final type = (apt['appointment_type'] ?? apt['doctor_name'] ?? '').toString().toLowerCase();
+          final matchesRole = type.isEmpty || type.contains(roleType) || (roleType == 'doctor' && type.contains('physician'));
+          return (s == 'waiting' || s == 'pending') && matchesRole;
+        }).toList();
+
+        final todayStr = DateTime.now().toIso8601String().substring(0, 10);
+        final completedToday = list.where((apt) {
+          final s = (apt['status'] ?? '').toString().toLowerCase();
+          final compAt = (apt['completed_at'] ?? apt['created_at'] ?? '').toString();
+          return s == 'completed' && compAt.startsWith(todayStr);
+        }).length;
+
+        setState(() {
+          _waitingAppointments = waiting;
+          _treatedCount = completedToday;
+        });
+      }
+    } catch (e) {
+      debugPrint('Failed to fetch appointments: $e');
+    }
+  }
+
   @override
   void dispose() {
-    _waitingSub?.cancel();
-    _completedSub?.cancel();
+    _wsSubscription?.cancel();
     super.dispose();
   }
 
@@ -127,51 +129,6 @@ class _MedicalDashboardPageState extends State<MedicalDashboardPage> {
     );
   }
 
-  Widget _buildPlaceholder(String title) {
-    return Container(
-      decoration: const BoxDecoration(
-        gradient: LinearGradient(
-          colors: [Color(0xFFE2E8F0), Color(0xFFEDF2F7)],
-          begin: Alignment.topCenter,
-          end: Alignment.bottomCenter,
-        ),
-      ),
-      child: Center(
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Icon(
-              title == 'Reports' ? Icons.description_outlined : Icons.person_outline,
-              size: 64,
-              color: const Color(0xFFCBD5E1),
-            ),
-            const SizedBox(height: 16),
-            Text(
-              '$title coming soon',
-              style: const TextStyle(
-                color: Color(0xFF64748B),
-                fontSize: 18,
-                fontWeight: FontWeight.w600,
-              ),
-            ),
-            if (title == 'Profile') ...[
-              const SizedBox(height: 24),
-              ElevatedButton.icon(
-                onPressed: _logout,
-                icon: const Icon(Icons.logout_rounded, size: 18, color: Colors.white),
-                label: const Text('Logout', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: Colors.redAccent,
-                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-                ),
-              )
-            ]
-          ],
-        ),
-      ),
-    );
-  }
-
   Widget _buildHomeTab() {
     return Container(
       decoration: const BoxDecoration(
@@ -212,7 +169,7 @@ class _MedicalDashboardPageState extends State<MedicalDashboardPage> {
                   'Welcome back,',
                   style: TextStyle(
                     fontFamily: 'Georgia',
-                    fontSize: 24,
+                    fontSize: 18,
                     fontWeight: FontWeight.w800,
                     color: Color(0xFF1A202C),
                     letterSpacing: -0.5,
@@ -223,7 +180,7 @@ class _MedicalDashboardPageState extends State<MedicalDashboardPage> {
                   widget.role == 'Doctor' ? 'Medical Officer' : 'Counsellor',
                   style: const TextStyle(
                     fontFamily: 'Georgia',
-                    fontSize: 24,
+                    fontSize: 18,
                     fontWeight: FontWeight.w800,
                     color: Color(0xFF1A202C),
                     letterSpacing: -0.5,
@@ -332,7 +289,7 @@ class _MedicalDashboardPageState extends State<MedicalDashboardPage> {
                     'New Appointment',
                     style: TextStyle(
                       color: Colors.white,
-                      fontSize: 15,
+                      fontSize: 13,
                       fontWeight: FontWeight.bold,
                       letterSpacing: 0.3,
                     ),
@@ -356,7 +313,7 @@ class _MedicalDashboardPageState extends State<MedicalDashboardPage> {
             child: Text(
               'Queue',
               style: TextStyle(
-                fontSize: 18,
+                fontSize: 15,
                 fontWeight: FontWeight.w800,
                 color: Color(0xFF1A202C),
               ),
@@ -368,7 +325,7 @@ class _MedicalDashboardPageState extends State<MedicalDashboardPage> {
                 ? const Center(
                     child: Text(
                       'No appointments in queue.',
-                      style: TextStyle(color: Color(0xFF718096), fontSize: 16, fontWeight: FontWeight.w600),
+                      style: TextStyle(color: Color(0xFF718096), fontSize: 14, fontWeight: FontWeight.w600),
                     ),
                   )
                 : ListView.builder(
@@ -388,40 +345,23 @@ class _MedicalDashboardPageState extends State<MedicalDashboardPage> {
                         pillTextColor: pillTextColor,
                         onComplete: (String diagnosis, bool referred) async {
                           try {
-                            // 1. Mark the appointment as completed
-                            await Supabase.instance.client
-                                .from('medical_appointments')
-                                .update({
-                                  'status': 'completed',
-                                  'doctor_notes': diagnosis,
-                                  'completed_at': DateTime.now().toUtc().toIso8601String(),
-                                })
-                                .eq('id', apt['id']);
+                            final aptId = (apt['id'] ?? '').toString();
+                            await ApiService.updateAppointment(aptId, {
+                              'status': 'completed',
+                              'appointment_type': widget.role.toLowerCase(),
+                              'doctor_notes': diagnosis,
+                              'referred': referred,
+                              'completed_at': DateTime.now().toUtc().toIso8601String(),
+                            });
 
-                            // 2. Clear medicalBookingType on the student record
-                            //    so the Warden app reverts the "Booked for Doctor" card
-                            final studentId = apt['student_id']?.toString();
-                            if (studentId != null) {
-                              try {
-                                await Supabase.instance.client
-                                    .from('students')
-                                    .update({
-                                      'medicalBookingType': null,
-                                      'medicalBookingTime': null,
-                                    })
-                                    .eq('id', studentId);
-                              } catch (e2) {
-                                debugPrint('Could not clear student booking: \$e2');
-                              }
-                            }
-                                
                             if (mounted) {
                               setState(() {
                                 _treatedCount++;
                               });
+                              _fetchAppointments();
                             }
                           } catch (e) {
-                            debugPrint('Error updating appointment: \$e');
+                            debugPrint('Error updating appointment: $e');
                           }
                         },
                       ).animate().fadeIn(delay: Duration(milliseconds: 100 * index)).slideX(begin: 0.05);
@@ -481,7 +421,7 @@ class _StatCard extends StatelessWidget {
                     '$count',
                     style: TextStyle(
                       color: textColor,
-                      fontSize: 22,
+                      fontSize: 17,
                       fontWeight: FontWeight.w900,
                     ),
                   ),
@@ -584,7 +524,7 @@ class _QueueCardState extends State<_QueueCard> {
                       const SizedBox(width: 12),
                       const Text(
                         'Complete Appointment',
-                        style: TextStyle(color: Color(0xFF1A202C), fontSize: 20, fontWeight: FontWeight.w800),
+                        style: TextStyle(color: Color(0xFF1A202C), fontSize: 16, fontWeight: FontWeight.w800),
                       ),
                     ],
                   ),
@@ -638,10 +578,10 @@ class _QueueCardState extends State<_QueueCard> {
                     child: SwitchListTile(
                       value: referred,
                       onChanged: (val) => setModalState(() => referred = val),
-                      activeColor: const Color(0xFF38B2AC),
+                      activeThumbColor: const Color(0xFF38B2AC),
                       title: const Text(
                         'Referred to Hospital',
-                        style: TextStyle(color: Color(0xFF2D3748), fontWeight: FontWeight.w600, fontSize: 15),
+                        style: TextStyle(color: Color(0xFF2D3748), fontWeight: FontWeight.w600, fontSize: 13),
                       ),
                       subtitle: const Text(
                         'Mark if further escalation is required',
@@ -663,7 +603,7 @@ class _QueueCardState extends State<_QueueCard> {
                         elevation: 0,
                         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
                       ),
-                      child: const Text('Save & Complete', style: TextStyle(color: Colors.white, fontWeight: FontWeight.w800, fontSize: 16)),
+                      child: const Text('Save & Complete', style: TextStyle(color: Colors.white, fontWeight: FontWeight.w800, fontSize: 14)),
                     ),
                   ),
                 ],
@@ -704,25 +644,29 @@ class _QueueCardState extends State<_QueueCard> {
             Builder(
               builder: (context) {
                 final base64String = widget.apt['profile_photo_base64']?.toString();
-                ImageProvider imageProvider;
-                if (base64String != null && base64String.isNotEmpty) {
+                final photoPath = widget.apt['photo_path']?.toString();
+                ImageProvider? imageProvider;
+
+                if (photoPath != null && photoPath.isNotEmpty) {
+                  imageProvider = NetworkImage(photoPath);
+                } else if (base64String != null && base64String.isNotEmpty) {
                   try {
                     String cleanBase64 = base64String.split(',').last.replaceAll(RegExp(r'\s+'), '');
                     final decodedBytes = base64Decode(cleanBase64);
                     imageProvider = MemoryImage(decodedBytes);
-                  } catch (_) {
+                  } catch (e) {
                     imageProvider = const AssetImage('assets/images/logo.png');
                   }
                 } else {
                   imageProvider = const AssetImage('assets/images/logo.png');
                 }
-                
+
                 return Container(
                   width: 52,
                   height: 52,
                   decoration: BoxDecoration(
                     shape: BoxShape.circle,
-                    color: const Color(0xFFE2E8F0), // Fallback gray
+                    color: const Color(0xFFE2E8F0),
                     image: DecorationImage(
                       image: imageProvider,
                       fit: BoxFit.cover,
@@ -740,7 +684,7 @@ class _QueueCardState extends State<_QueueCard> {
                     widget.apt['student_name'] ?? 'Unknown',
                     style: const TextStyle(
                       color: Color(0xFF1A202C),
-                      fontSize: 16,
+                      fontSize: 14,
                       fontWeight: FontWeight.w800,
                     ),
                   ),

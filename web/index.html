@@ -34,9 +34,13 @@
   <title>NIFT Hostel — Smart Student Management</title>
   <link rel="manifest" href="manifest.json">
 
-  <!-- PDF.js: required for the `printing` package to render PDF previews on web -->
+  <style>
+    html, body { margin: 0; padding: 0; background: #0F1117; }
+  </style>
+
+  <!-- PDF.js: required for the `printing` package to render PDF previews on web. Deferred so it never blocks app startup. -->
   <script>var dartPdfJsVersion = "3.2.146";</script>
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.2.146/pdf.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.2.146/pdf.min.js" defer></script>
 </head>
 <body>
   <!--

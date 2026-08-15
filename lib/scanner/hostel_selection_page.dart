@@ -102,7 +102,7 @@ class _HostelSelectionPageState extends State<HostelSelectionPage>
                       child: Text(AppConfig.appName,
                           style: TextStyle(
                               color: Colors.white,
-                              fontSize: 16,
+                              fontSize: 14,
                               fontWeight: FontWeight.w900,
                               letterSpacing: 1)),
                     ),
@@ -124,7 +124,7 @@ class _HostelSelectionPageState extends State<HostelSelectionPage>
                                 colors: [ChatPalette.accent, ChatPalette.accentDeep],
                               ).createShader(
                                   const Rect.fromLTWH(0, 0, 280, 60)),
-                            fontSize: 32,
+                            fontSize: 24,
                             fontWeight: FontWeight.w900,
                             letterSpacing: -1,
                             height: 1.1,
@@ -137,7 +137,7 @@ class _HostelSelectionPageState extends State<HostelSelectionPage>
                         'Choose a hostel below to start\nscanning the admission form.',
                         style: TextStyle(
                             color: ChatPalette.muted,
-                            fontSize: 15,
+                            fontSize: 13,
                             height: 1.5),
                       )
                           .animate()
@@ -382,7 +382,7 @@ class _HostelCardState extends State<_HostelCard>
                             Text(widget.title,
                                 style: TextStyle(
                                     color: ChatPalette.text,
-                                    fontSize: 18,
+                                    fontSize: 15,
                                     fontWeight: FontWeight.w900,
                                     letterSpacing: -0.3)),
                             SizedBox(height: 2),

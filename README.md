@@ -12,14 +12,14 @@ A cross-platform **Flutter** application for managing student hostels at NIFT Sh
 - 📅 **Events & Notices** — Hostel event management and announcements
 - 📊 **PDF Reports** — Generate and print attendance and student reports
 - 🔔 **Reminders** — Smart AI-generated reminders
-- 🌐 **Offline Support** — Works offline with Hive local cache + Supabase sync
+- 🌐 **Offline Support** — Works offline with Hive local cache + backend sync
 
 ## 🛠️ Tech Stack
 
 | Layer | Technology |
 |---|---|
 | Framework | Flutter 3.41 (Dart 3.11) |
-| Backend | Supabase (PostgreSQL + Auth + Realtime) |
+| Backend | Self-hosted Node.js + PostgreSQL + Redis (Oracle Cloud) |
 | AI | Google Gemini API + Groq API |
 | State | Riverpod |
 | Local Cache | Hive |
@@ -73,7 +73,7 @@ The app is hosted on **Cloudflare Pages** and auto-deploys on every push to `mai
 
 ```
 lib/
-├── main.dart              # App entry + Supabase init
+├── main.dart              # App entry + WebSocket init
 ├── splash_screen.dart     # Animated splash
 ├── auth/                  # Login / auth flow
 ├── home/                  # Dashboard + reminders
@@ -92,7 +92,7 @@ lib/
 
 ## 🔐 Environment & Keys
 
-All API keys (Gemini, Groq) are fetched at runtime from the **Supabase `app_config` table** — no keys are hardcoded in this repository. The Supabase publishable anon key is safe to commit.
+All API keys (Gemini, Groq) are fetched at runtime from the backend `app_config` table — no keys are hardcoded in this repository.
 
 ## 📄 License
 

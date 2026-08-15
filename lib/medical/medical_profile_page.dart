@@ -121,7 +121,7 @@ class MedicalProfilePage extends StatelessWidget {
           const SizedBox(height: 16),
           Text(
             role == 'Doctor' ? 'Dr. Medical Officer' : 'Counsellor',
-            style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w800, color: Color(0xFF1A202C)),
+            style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w800, color: Color(0xFF1A202C)),
           ),
           const SizedBox(height: 4),
           Text(
@@ -367,7 +367,7 @@ class MedicalProfilePage extends StatelessWidget {
             const SizedBox(height: 16),
             const Text(
               'Sign Out?',
-              style: TextStyle(fontSize: 18, fontWeight: FontWeight.w800, color: Color(0xFF1A202C)),
+              style: TextStyle(fontSize: 15, fontWeight: FontWeight.w800, color: Color(0xFF1A202C)),
             ),
             const SizedBox(height: 8),
             const Text(

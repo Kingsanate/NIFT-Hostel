@@ -1,9 +1,9 @@
 import 'package:flutter/material.dart';
-import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:intl/intl.dart';
 import 'dart:convert';
 import 'prescription_pdf_generator.dart';
 import 'package:flutter_animate/flutter_animate.dart';
+import '../services/api_service.dart';
 
 class MedicalHistoryPage extends StatefulWidget {
   final String doctorName;
@@ -41,15 +41,12 @@ class _MedicalHistoryPageState extends State<MedicalHistoryPage> {
 
   Future<void> _fetchHistory() async {
     try {
-      final res = await Supabase.instance.client
-          .from('medical_appointments')
-          .select()
-          .eq('status', 'completed')
-          .order('completed_at', ascending: false);
+      final list = await ApiService.fetchMedicalAppointments();
+      final completed = list.where((apt) => (apt['status'] ?? '').toString().toLowerCase() == 'completed').toList();
       
       if (mounted) {
         setState(() {
-          _history = List<Map<String, dynamic>>.from(res);
+          _history = completed;
           _filteredHistory = List.from(_history);
           _isLoading = false;
         });
@@ -108,7 +105,7 @@ class _MedicalHistoryPageState extends State<MedicalHistoryPage> {
                           const Text(
                             'Consultation History',
                             style: TextStyle(
-                              fontSize: 22,
+                              fontSize: 17,
                               fontWeight: FontWeight.w800,
                               color: Color(0xFF1A202C),
                               letterSpacing: -0.5,
@@ -139,7 +136,7 @@ class _MedicalHistoryPageState extends State<MedicalHistoryPage> {
                       child: Center(
                         child: Text(
                           _searchQuery.isEmpty ? 'No completed consultations yet.' : 'No results found.',
-                          style: const TextStyle(fontSize: 16, color: Color(0xFFA0AEC0), fontWeight: FontWeight.w600),
+                          style: const TextStyle(fontSize: 14, color: Color(0xFFA0AEC0), fontWeight: FontWeight.w600),
                         ),
                       ),
                     )
@@ -148,13 +145,8 @@ class _MedicalHistoryPageState extends State<MedicalHistoryPage> {
                       padding: const EdgeInsets.symmetric(horizontal: 24.0),
                       sliver: SliverList(
                         delegate: SliverChildBuilderDelegate(
-                          (context, index) {
-                            if (index == _filteredHistory.length) {
-                              return _buildLoadMoreButton();
-                            }
-                            return _buildHistoryCard(_filteredHistory[index], index);
-                          },
-                          childCount: _filteredHistory.length + 1, // +1 for the Load More button
+                          (context, index) => _buildHistoryCard(_filteredHistory[index], index),
+                          childCount: _filteredHistory.length,
                         ),
                       ),
                     ),
@@ -313,13 +305,17 @@ class _MedicalHistoryPageState extends State<MedicalHistoryPage> {
                   Builder(
                     builder: (context) {
                       final base64String = apt['profile_photo_base64']?.toString();
-                      ImageProvider imageProvider;
-                      if (base64String != null && base64String.isNotEmpty) {
+                      final photoPath = apt['photo_path']?.toString();
+                      ImageProvider? imageProvider;
+
+                      if (photoPath != null && photoPath.isNotEmpty) {
+                        imageProvider = NetworkImage(photoPath);
+                      } else if (base64String != null && base64String.isNotEmpty) {
                         try {
                           String cleanBase64 = base64String.split(',').last.replaceAll(RegExp(r'\s+'), '');
                           final decodedBytes = base64Decode(cleanBase64);
                           imageProvider = MemoryImage(decodedBytes);
-                        } catch (_) {
+                        } catch (e) {
                           imageProvider = const AssetImage('assets/images/logo.png');
                         }
                       } else {
@@ -344,7 +340,7 @@ class _MedicalHistoryPageState extends State<MedicalHistoryPage> {
                         Text(
                           apt['student_name'] ?? 'Unknown Student',
                           style: const TextStyle(
-                            fontSize: 18,
+                            fontSize: 15,
                             fontWeight: FontWeight.w800,
                             color: Color(0xFF1A202C),
                           ),
@@ -414,29 +410,5 @@ class _MedicalHistoryPageState extends State<MedicalHistoryPage> {
     ).animate().fadeIn(delay: Duration(milliseconds: 50 * index)).slideY(begin: 0.05);
   }
 
-  Widget _buildLoadMoreButton() {
-    return Padding(
-      padding: const EdgeInsets.only(top: 8.0, bottom: 24.0),
-      child: Center(
-        child: OutlinedButton(
-          onPressed: () {
-            // Future implementation for pagination
-          },
-          style: OutlinedButton.styleFrom(
-            padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
-            side: const BorderSide(color: Color(0xFFCBD5E1)),
-            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-          ),
-          child: const Text(
-            'Load More History',
-            style: TextStyle(
-              color: Color(0xFF4A5568),
-              fontWeight: FontWeight.w700,
-              fontSize: 13,
-            ),
-          ),
-        ),
-      ),
-    );
-  }
 }
+

@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
-import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:flutter_animate/flutter_animate.dart';
+import '../services/api_service.dart';
 
 class MedicalReportsPage extends StatefulWidget {
   const MedicalReportsPage({super.key});
@@ -38,24 +38,18 @@ class _MedicalReportsPageState extends State<MedicalReportsPage> {
   Future<void> _fetchStats() async {
     setState(() => _isLoading = true);
     try {
-      // Create date range for the selected month/year
       int monthIndex = _months.indexOf(_selectedMonth) + 1;
       int year = int.parse(_selectedYear);
-      String startDate = '$year-${monthIndex.toString().padLeft(2, '0')}-01';
-      
-      // Calculate next month for end date
-      int nextMonth = monthIndex == 12 ? 1 : monthIndex + 1;
-      int nextYear = monthIndex == 12 ? year + 1 : year;
-      String endDate = '$nextYear-${nextMonth.toString().padLeft(2, '0')}-01';
+      String monthPrefix = '$year-${monthIndex.toString().padLeft(2, '0')}';
 
-      final res = await Supabase.instance.client
-          .from('medical_appointments')
-          .select('id, student_roll_no')
-          .gte('created_at', startDate)
-          .lt('created_at', endDate);
+      final list = await ApiService.fetchMedicalAppointments();
+      final filtered = list.where((apt) {
+        final date = (apt['created_at'] ?? apt['completed_at'] ?? '').toString();
+        return date.startsWith(monthPrefix);
+      }).toList();
           
       if (mounted) {
-        final List<dynamic> data = res;
+        final List<dynamic> data = filtered;
         _totalConsultations = data.length;
         
         // Count unique patients by roll number
@@ -96,7 +90,7 @@ class _MedicalReportsPageState extends State<MedicalReportsPage> {
                     const Text(
                       'Monthly Health Reports',
                       style: TextStyle(
-                        fontSize: 22,
+                        fontSize: 17,
                         fontWeight: FontWeight.w800,
                         color: Color(0xFF1A202C),
                         letterSpacing: -0.5,
@@ -285,7 +279,7 @@ class _MedicalReportsPageState extends State<MedicalReportsPage> {
         children: [
           Text(title, style: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: Color(0xFFA0AEC0))),
           const SizedBox(height: 4),
-          Text(value, style: const TextStyle(fontSize: 24, fontWeight: FontWeight.w900, color: Color(0xFF1A202C))),
+          Text(value, style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w900, color: Color(0xFF1A202C))),
         ],
       ),
     );
@@ -315,7 +309,7 @@ class _MedicalReportsPageState extends State<MedicalReportsPage> {
           const SizedBox(height: 16),
           const Text(
             'Detailed Monthly Report',
-            style: TextStyle(fontSize: 16, fontWeight: FontWeight.w800, color: Color(0xFF1A202C)),
+            style: TextStyle(fontSize: 14, fontWeight: FontWeight.w800, color: Color(0xFF1A202C)),
           ),
           const SizedBox(height: 8),
           const Text(
@@ -373,7 +367,7 @@ class _MedicalReportsPageState extends State<MedicalReportsPage> {
             children: [
               Icon(Icons.bar_chart, color: Color(0xFF2C5282), size: 20),
               SizedBox(width: 8),
-              Text('Top Health Concerns', style: TextStyle(fontSize: 16, fontWeight: FontWeight.w800, color: Color(0xFF2C5282))),
+              Text('Top Health Concerns', style: TextStyle(fontSize: 14, fontWeight: FontWeight.w800, color: Color(0xFF2C5282))),
             ],
           ),
           const SizedBox(height: 20),

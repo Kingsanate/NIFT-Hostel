@@ -1,8 +1,10 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_animate/flutter_animate.dart';
-import 'package:supabase_flutter/supabase_flutter.dart';
-import '../chat/chat_palette.dart';
 import 'package:intl/intl.dart';
+import '../chat/chat_palette.dart';
+import '../services/api_service.dart';
+import '../services/websocket_service.dart';
 
 class RemindersPage extends StatefulWidget {
   const RemindersPage({super.key});
@@ -14,6 +16,7 @@ class RemindersPage extends StatefulWidget {
 class _RemindersPageState extends State<RemindersPage> {
   bool _isLoading = true;
   List<Map<String, dynamic>> _reminders = [];
+  StreamSubscription? _wsSubscription;
 
   @override
   void initState() {
@@ -22,29 +25,26 @@ class _RemindersPageState extends State<RemindersPage> {
     _setupRealtime();
   }
 
+  @override
+  void dispose() {
+    _wsSubscription?.cancel();
+    super.dispose();
+  }
+
   void _setupRealtime() {
-    Supabase.instance.client
-        .channel('public:reminders')
-        .onPostgresChanges(
-            event: PostgresChangeEvent.all,
-            schema: 'public',
-            table: 'reminders',
-            callback: (payload) {
-              _fetchReminders();
-            })
-        .subscribe();
+    _wsSubscription = WebSocketService.instance.events.listen((event) {
+      if (event['type'] == 'REMINDERS_CHANGED') {
+        _fetchReminders();
+      }
+    });
   }
 
   Future<void> _fetchReminders() async {
     try {
-      final res = await Supabase.instance.client
-          .from('reminders')
-          .select('id, title, message, priority, due_date')
-          .order('created_at', ascending: false)
-          .limit(50);
+      final list = await ApiService.fetchReminders();
       if (mounted) {
         setState(() {
-          _reminders = List<Map<String, dynamic>>.from(res);
+          _reminders = list;
           _isLoading = false;
         });
       }
@@ -73,9 +73,13 @@ class _RemindersPageState extends State<RemindersPage> {
 
     if (confirm != true) return;
 
+    // Optimistic 0ms UI update
+    setState(() {
+      _reminders.removeWhere((r) => r['id'].toString() == id);
+    });
+
     try {
-      await Supabase.instance.client.from('reminders').delete().eq('id', id);
-      // Realtime listener will handle the UI update
+      await ApiService.deleteReminder(id);
     } catch (e) {
       debugPrint('Error deleting reminder: $e');
     }
@@ -100,11 +104,16 @@ class _RemindersPageState extends State<RemindersPage> {
 
     if (confirm != true) return;
 
-    try {
-      // Supabase trick: eq on a non-null column to delete all rows, or you can use neq
-      await Supabase.instance.client.from('reminders').delete().neq('id', '00000000-0000-0000-0000-000000000000');
-    } catch (e) {
-      debugPrint('Error clearing reminders: $e');
+    final toDelete = List<Map<String, dynamic>>.from(_reminders);
+    setState(() {
+      _reminders.clear();
+    });
+
+    for (final r in toDelete) {
+      final id = r['id']?.toString();
+      if (id != null) {
+        await ApiService.deleteReminder(id);
+      }
     }
   }
 
@@ -163,9 +172,9 @@ class _RemindersPageState extends State<RemindersPage> {
                   child: Column(
                     mainAxisAlignment: MainAxisAlignment.center,
                     children: [
-                      Icon(Icons.notifications_off_outlined, size: 64, color: ChatPalette.dim.withValues(alpha: 0.5)),
+                      Icon(Icons.notifications_off_outlined, size: 28, color: ChatPalette.dim.withValues(alpha: 0.5)),
                       const SizedBox(height: 16),
-                      Text('No upcoming reminders', style: TextStyle(color: ChatPalette.dim, fontSize: 16)),
+                      Text('No upcoming reminders', style: TextStyle(color: ChatPalette.dim, fontSize: 14)),
                     ],
                   ),
                 )
@@ -217,7 +226,7 @@ class _RemindersPageState extends State<RemindersPage> {
                                     Expanded(
                                       child: Text(
                                         title,
-                                        style: TextStyle(color: ChatPalette.text, fontSize: 16, fontWeight: FontWeight.w700),
+                                        style: TextStyle(color: ChatPalette.text, fontSize: 14, fontWeight: FontWeight.w700),
                                       ),
                                     ),
                                     IconButton(

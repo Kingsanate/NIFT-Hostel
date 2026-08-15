@@ -1,5 +1,4 @@
 import 'package:flutter/material.dart';
-import '../../main.dart'; // For AppConfig
 import 'package:flutter_animate/flutter_animate.dart';
 import '../chat_palette.dart';
 import '../models/chat_models.dart';
@@ -134,7 +133,7 @@ class _Header extends StatelessWidget {
                     text: 'NIFT ',
                     style: TextStyle(
                       color: ChatPalette.accent,
-                      fontSize: 18,
+                      fontSize: 15,
                       fontWeight: FontWeight.w900,
                       letterSpacing: -0.3,
                     ),
@@ -143,7 +142,7 @@ class _Header extends StatelessWidget {
                     text: 'Hostel Shillong',
                     style: TextStyle(
                       color: ChatPalette.text,
-                      fontSize: 18,
+                      fontSize: 15,
                       fontWeight: FontWeight.w800,
                       letterSpacing: -0.3,
                     ),
@@ -329,27 +328,33 @@ class _EmptyState extends StatelessWidget {
           child: Column(
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
-              // Logo
+              // Official NIFT Logo with thin black border
               Container(
-                width: 64,
-                height: 64,
+                width: 84,
+                height: 84,
+                padding: const EdgeInsets.all(4),
                 decoration: BoxDecoration(
-                  gradient: const LinearGradient(
-                    colors: [Color(0xFF1A73E8), Color(0xFF4285F4)],
-                    begin: Alignment.topLeft,
-                    end: Alignment.bottomRight,
-                  ),
-                  borderRadius: BorderRadius.circular(20),
+                  shape: BoxShape.circle,
+                  color: Colors.white,
+                  border: Border.all(color: Colors.black87, width: 1.2),
                   boxShadow: [
                     BoxShadow(
-                      color: const Color(0xFF1A73E8).withValues(alpha: 0.3),
-                      blurRadius: 24,
-                      offset: const Offset(0, 10),
+                      color: Colors.black.withValues(alpha: 0.08),
+                      blurRadius: 12,
+                      offset: const Offset(0, 4),
                     ),
                   ],
                 ),
-                child: const Icon(Icons.auto_awesome_rounded,
-                    color: Colors.white, size: 30),
+                child: ClipOval(
+                  child: Image.asset(
+                    'assets/images/nift_official_logo.png',
+                    fit: BoxFit.contain,
+                    errorBuilder: (ctx, obj, err) => Image.asset(
+                      'assets/images/logo.png',
+                      fit: BoxFit.contain,
+                    ),
+                  ),
+                ),
               )
                   .animate()
                   .fadeIn(duration: 400.ms)
@@ -357,12 +362,12 @@ class _EmptyState extends StatelessWidget {
                       begin: const Offset(0.8, 0.8),
                       curve: Curves.elasticOut,
                       duration: 600.ms),
-              const SizedBox(height: 24),
-              Text('How can I help?',
+              const SizedBox(height: 20),
+              Text('How may I help you?',
                   textAlign: TextAlign.center,
                   style: TextStyle(
                     color: ChatPalette.text,
-                    fontSize: 30,
+                    fontSize: 22,
                     fontWeight: FontWeight.w800,
                     letterSpacing: -0.8,
                     height: 1.1,
@@ -372,7 +377,7 @@ class _EmptyState extends StatelessWidget {
                   .slideY(begin: 0.15, curve: Curves.easeOut),
               const SizedBox(height: 8),
               Text(
-                'Ask anything about hostel operations, students,\ncomplaints, or communication.',
+                'Ask anything about hostel operations, students records\nwith rules and regulations.',
                 textAlign: TextAlign.center,
                 style: TextStyle(
                     color: ChatPalette.muted, fontSize: 14, height: 1.5),
@@ -609,7 +614,7 @@ class _UserBubble extends StatelessWidget {
               child: SelectableText(
                 message.text,
                 style: const TextStyle(
-                    color: Colors.white, fontSize: 15, height: 1.5),
+                    color: Colors.white, fontSize: 13, height: 1.5),
               ),
             ),
           ),
@@ -672,7 +677,7 @@ class _AiBubble extends StatelessWidget {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text('${AppConfig.appName.split(' ').first} Chat',
+                Text('Ani Chat',
                     style: TextStyle(
                         color: ChatPalette.accent,
                         fontSize: 11,
@@ -691,12 +696,8 @@ class _AiBubble extends StatelessWidget {
                     ),
                     border: Border.all(color: ChatPalette.border),
                   ),
-                  child: SelectableText(
-                    message.text,
-                    style: TextStyle(
-                        color: ChatPalette.text,
-                        fontSize: 15,
-                        height: 1.55),
+                  child: _FormattedMessageView(
+                    text: message.text,
                   ),
                 ),
                 const SizedBox(height: 6),
@@ -786,51 +787,58 @@ class _ThinkingBubble extends StatelessWidget {
               ),
               const SizedBox(width: 10),
               Flexible(
-                child: Container(
-                  padding: const EdgeInsets.symmetric(
-                      horizontal: 16, vertical: 14),
-                  decoration: BoxDecoration(
-                    color: ChatPalette.canvas,
-                    borderRadius: const BorderRadius.only(
-                      topLeft: Radius.circular(4),
-                      topRight: Radius.circular(18),
-                      bottomLeft: Radius.circular(18),
-                      bottomRight: Radius.circular(18),
-                    ),
-                    border: Border.all(color: ChatPalette.border),
-                  ),
-                  child: (text != null && text!.isNotEmpty)
-                      ? SelectableText(
-                          text!,
-                          style: TextStyle(
-                            fontSize: 15,
-                            height: 1.6,
-                            color: ChatPalette.text,
-                          ),
-                        )
-                      : Row(
-                          mainAxisSize: MainAxisSize.min,
-                          children: List.generate(
-                            3,
-                            (i) => Container(
-                              margin: EdgeInsets.only(right: i < 2 ? 4 : 0),
-                              width: 7,
-                              height: 7,
-                              decoration: BoxDecoration(
-                                  color: ChatPalette.accent,
-                                  shape: BoxShape.circle),
-                            )
-                                .animate(onPlay: (c) => c.repeat())
-                        .moveY(
-                            begin: 0,
-                            end: -6,
-                            delay: Duration(milliseconds: i * 180),
-                            duration: 450.ms,
-                            curve: Curves.easeOut)
-                        .then()
-                        .moveY(end: 0, duration: 450.ms),
-                          ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text('Ani Chat',
+                        style: TextStyle(
+                            color: ChatPalette.accent,
+                            fontSize: 11,
+                            fontWeight: FontWeight.w700,
+                            letterSpacing: 0.2)),
+                    const SizedBox(height: 5),
+                    Container(
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 16, vertical: 14),
+                      decoration: BoxDecoration(
+                        color: ChatPalette.canvas,
+                        borderRadius: const BorderRadius.only(
+                          topLeft: Radius.circular(4),
+                          topRight: Radius.circular(18),
+                          bottomLeft: Radius.circular(18),
+                          bottomRight: Radius.circular(18),
                         ),
+                        border: Border.all(color: ChatPalette.border),
+                      ),
+                      child: (text != null && text!.isNotEmpty)
+                          ? _FormattedMessageView(
+                              text: text!,
+                            )
+                          : Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: List.generate(
+                                3,
+                                (i) => Container(
+                                  margin: EdgeInsets.only(right: i < 2 ? 4 : 0),
+                                  width: 7,
+                                  height: 7,
+                                  decoration: BoxDecoration(
+                                      color: ChatPalette.accent,
+                                      shape: BoxShape.circle),
+                                )
+                                    .animate(onPlay: (c) => c.repeat())
+                            .moveY(
+                                begin: 0,
+                                end: -6,
+                                delay: Duration(milliseconds: i * 180),
+                                duration: 450.ms,
+                                curve: Curves.easeOut)
+                            .then()
+                            .moveY(end: 0, duration: 450.ms),
+                              ),
+                            ),
+                    ),
+                  ],
                 ),
               ),
             ],
@@ -838,5 +846,178 @@ class _ThinkingBubble extends StatelessWidget {
         ),
       ),
     );
+  }
+}
+
+// ── Formatted Message Markdown View (Zero Raw Asterisks) ───────────────────────
+class _FormattedMessageView extends StatelessWidget {
+  final String text;
+
+  const _FormattedMessageView({
+    required this.text,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final style = TextStyle(
+      color: ChatPalette.text,
+      fontSize: 13,
+      height: 1.55,
+      letterSpacing: 0.1,
+    );
+
+    final lines = text.split('\n');
+    final List<Widget> lineWidgets = [];
+
+    for (int i = 0; i < lines.length; i++) {
+      final rawLine = lines[i];
+      final trimmed = rawLine.trim();
+
+      if (trimmed.isEmpty) {
+        lineWidgets.add(const SizedBox(height: 6));
+        continue;
+      }
+
+      // Check for markdown headers (### or ## or #)
+      if (trimmed.startsWith('### ')) {
+        final headerContent = trimmed.substring(4).replaceAll(RegExp(r'\*\*|\*'), '').trim();
+        lineWidgets.add(
+          Padding(
+            padding: const EdgeInsets.only(top: 6, bottom: 3),
+            child: Text(
+              headerContent,
+              style: style.copyWith(
+                fontWeight: FontWeight.w700,
+                fontSize: (style.fontSize ?? 13) + 1.5,
+                color: ChatPalette.text,
+              ),
+            ),
+          ),
+        );
+        continue;
+      } else if (trimmed.startsWith('## ') || trimmed.startsWith('# ')) {
+        final headerContent = trimmed.replaceFirst(RegExp(r'^#+\s*'), '').replaceAll(RegExp(r'\*\*|\*'), '').trim();
+        lineWidgets.add(
+          Padding(
+            padding: const EdgeInsets.only(top: 8, bottom: 4),
+            child: Text(
+              headerContent,
+              style: style.copyWith(
+                fontWeight: FontWeight.w800,
+                fontSize: (style.fontSize ?? 13) + 2.5,
+                color: ChatPalette.text,
+              ),
+            ),
+          ),
+        );
+        continue;
+      }
+
+      // Check if line is a bullet item (- or * or • or number.)
+      final isBullet = RegExp(r'^(\s*[-*•]|\s*\d+\.)\s+').hasMatch(rawLine);
+      String lineToParse = rawLine;
+      Widget? leadingPrefix;
+
+      if (isBullet) {
+        final bulletMatch = RegExp(r'^(\s*)([-*•]|\d+\.)\s+(.*)$').firstMatch(rawLine);
+        if (bulletMatch != null) {
+          final bulletSymbol = bulletMatch.group(2)!;
+          final content = bulletMatch.group(3)!;
+          lineToParse = content;
+
+          final isNum = RegExp(r'^\d+\.').hasMatch(bulletSymbol);
+          leadingPrefix = Padding(
+            padding: const EdgeInsets.only(right: 6, top: 1),
+            child: Text(
+              isNum ? bulletSymbol : '•',
+              style: TextStyle(
+                color: ChatPalette.accent,
+                fontWeight: FontWeight.w800,
+                fontSize: (style.fontSize ?? 13),
+              ),
+            ),
+          );
+        }
+      }
+
+      final spans = _parseMarkdownSpans(lineToParse, style);
+
+      if (leadingPrefix != null) {
+        lineWidgets.add(
+          Padding(
+            padding: const EdgeInsets.only(bottom: 3),
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                leadingPrefix,
+                Expanded(
+                  child: SelectableText.rich(
+                    TextSpan(children: spans),
+                    style: style,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        );
+      } else {
+        lineWidgets.add(
+          Padding(
+            padding: const EdgeInsets.only(bottom: 3),
+            child: SelectableText.rich(
+              TextSpan(children: spans),
+              style: style,
+            ),
+          ),
+        );
+      }
+    }
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      mainAxisSize: MainAxisSize.min,
+      children: lineWidgets,
+    );
+  }
+
+  static List<InlineSpan> _parseMarkdownSpans(String line, TextStyle baseStyle) {
+    final List<InlineSpan> spans = [];
+    final boldPattern = RegExp(r'\*\*(.+?)\*\*');
+    int lastEnd = 0;
+
+    for (final match in boldPattern.allMatches(line)) {
+      if (match.start > lastEnd) {
+        final plainText = line.substring(lastEnd, match.start).replaceAll('*', '');
+        if (plainText.isNotEmpty) {
+          spans.add(TextSpan(text: plainText, style: baseStyle));
+        }
+      }
+
+      final boldContent = match.group(1) ?? '';
+      spans.add(
+        TextSpan(
+          text: boldContent,
+          style: baseStyle.copyWith(
+            fontWeight: FontWeight.w700,
+            color: ChatPalette.text,
+          ),
+        ),
+      );
+
+      lastEnd = match.end;
+    }
+
+    if (lastEnd < line.length) {
+      final remainder = line.substring(lastEnd).replaceAll('*', '');
+      if (remainder.isNotEmpty) {
+        spans.add(TextSpan(text: remainder, style: baseStyle));
+      }
+    }
+
+    if (spans.isEmpty) {
+      spans.add(TextSpan(text: line.replaceAll('*', ''), style: baseStyle));
+    }
+
+    return spans;
   }
 }

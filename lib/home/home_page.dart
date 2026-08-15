@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_animate/flutter_animate.dart';
 import '../core/palette.dart';
-import 'package:supabase_flutter/supabase_flutter.dart';
+import '../services/student_repository.dart';
 import '../scanner/hostel_selection_page.dart';
 import '../main.dart'; // For AppConfig
 import '../chat/chat_page.dart';
@@ -19,73 +19,11 @@ class HomePage extends StatefulWidget {
 }
 
 class _HomePageState extends State<HomePage> {
-  int _totalStudents = 0;
-  int _occupiedRooms = 0;
-  int _pendingIssues = 0;
-  bool _isLoadingStats = true;
-
   @override
   void initState() {
     super.initState();
-    _fetchStats();
-  }
-
-  Future<void> _fetchStats() async {
-    try {
-      Future<List<dynamic>> safeSelect(String table, [String? eqCol, String? eqVal]) async {
-        try {
-          var query = Supabase.instance.client.from(table).select('id');
-          if (eqCol != null && eqVal != null) query = query.eq(eqCol, eqVal);
-          return await query;
-        } catch (e) {
-          debugPrint('Error fetching stats for $table: $e');
-          return [];
-        }
-      }
-
-      final responses = await Future.wait([
-        safeSelect('students'),
-        safeSelect('complaints'),
-      ]);
-
-      // Calculate occupied rooms dynamically from students table
-      final allStudents = responses[0];
-      final occupiedRoomSet = <String>{};
-      for (final s in allStudents) {
-        final room = s['room']?.toString() ?? '';
-        if (room.isNotEmpty && room != 'Pending') {
-          occupiedRoomSet.add(room);
-        }
-      }
-
-      final recentData = await Supabase.instance.client
-          .from('students')
-          .select('id, name, course, room, created_at')
-          .order('created_at', ascending: false)
-          .limit(3);
-
-      final parsedRecent = (recentData as List<dynamic>).map((e) {
-        final timeStr = _formatTimeAgo(DateTime.tryParse(e['created_at']?.toString() ?? '') ?? DateTime.now());
-        return _StudentEntry(
-          name: e['name'] ?? 'Unknown',
-          dept: e['course'] ?? 'N/A',
-          room: e['room'] ?? 'TBD',
-          time: timeStr,
-        );
-      }).toList();
-
-      if (mounted) {
-        setState(() {
-          _totalStudents = allStudents.length;
-          _occupiedRooms = occupiedRoomSet.length;
-          _pendingIssues = responses[1].length;
-          _recentStudents = parsedRecent;
-          _isLoadingStats = false;
-        });
-      }
-    } catch (e) {
-      if (mounted) setState(() => _isLoadingStats = false);
-    }
+    // Silent background sync
+    StudentRepository.syncWithBackend();
   }
 
   String _formatTimeAgo(DateTime dt) {
@@ -95,9 +33,6 @@ class _HomePageState extends State<HomePage> {
     if (diff.inMinutes > 0) return '${diff.inMinutes}m ago';
     return 'Just now';
   }
-
-  // Real recent entries from DB
-  List<_StudentEntry> _recentStudents = [];
 
   @override
   Widget build(BuildContext context) {
@@ -141,35 +76,67 @@ class _HomePageState extends State<HomePage> {
             ),
           ),
 
-          // Main scroll content
+          // Main scroll content — instant 0ms reactive repository
           SafeArea(
-            child: CustomScrollView(
-              slivers: [
-                SliverToBoxAdapter(child: _TopBar()),
-                SliverToBoxAdapter(child: _WelcomeBanner()),
-                SliverToBoxAdapter(
-                  child: _isLoadingStats 
-                    ? const Center(child: Padding(padding: EdgeInsets.all(20), child: CircularProgressIndicator(color: Pal.indigo)))
-                    : _StatsRow(
-                        totalStudents: _totalStudents,
-                        occupiedRooms: _occupiedRooms,
-                        pendingIssues: _pendingIssues,
+            child: ValueListenableBuilder<List<StudentModel>>(
+              valueListenable: StudentRepository.studentsNotifier,
+              builder: (context, studentList, _) {
+                final occupiedRoomSet = <String>{};
+                for (final s in studentList) {
+                  final room = s.roomNo.trim();
+                  if (room.isNotEmpty &&
+                      room != 'Pending' &&
+                      room.toUpperCase() != 'TBD') {
+                    occupiedRoomSet.add(room);
+                  }
+                }
+
+                final recentEntries = studentList.take(3).map((s) {
+                  return _StudentEntry(
+                    name: s.name.isNotEmpty ? s.name : 'Unknown',
+                    dept: s.department.isNotEmpty ? s.department : 'N/A',
+                    room: s.roomNo.isNotEmpty ? s.roomNo : 'TBD',
+                    time: _formatTimeAgo(s.createdAt),
+                  );
+                }).toList();
+
+                return CustomScrollView(
+                  slivers: [
+                    SliverToBoxAdapter(child: _TopBar()),
+                    SliverToBoxAdapter(child: _WelcomeBanner()),
+                    SliverToBoxAdapter(
+                      child: _StatsRow(
+                        totalStudents: studentList.length,
+                        occupiedRooms: occupiedRoomSet.length,
                       ),
-                ),
-                SliverToBoxAdapter(child: _HeroScanCard(onTap: _openScanner)),
-                SliverToBoxAdapter(
-                  child: _SecondaryActions(
-                    onChat: _openChat,
-                    onStudents: _openScanner,
-                    totalStudents: _totalStudents,
-                  ),
-                ),
-                SliverToBoxAdapter(child: _RecentSection(students: _recentStudents)),
-                const SliverToBoxAdapter(child: SizedBox(height: 32)),
-              ],
+                    ),
+                    SliverToBoxAdapter(child: _HeroScanCard(onTap: _openScanner)),
+                    SliverToBoxAdapter(
+                      child: _SecondaryActions(
+                        onChat: _openChat,
+                        onStudents: _openStudents,
+                        totalStudents: studentList.length,
+                      ),
+                    ),
+                    SliverToBoxAdapter(
+                        child: _RecentSection(students: recentEntries)),
+                    const SliverToBoxAdapter(child: SizedBox(height: 32)),
+                  ],
+                );
+              },
             ),
           ),
         ],
+      ),
+    );
+  }
+
+  void _openStudents() {
+    Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (_) => const ChatPage(
+          initialDestination: SidebarDestination.totalEntries,
+        ),
       ),
     );
   }
@@ -190,14 +157,17 @@ class _HomePageState extends State<HomePage> {
     );
 
     if (result != null && mounted) {
-      Navigator.of(context).push(
-        MaterialPageRoute(
-          builder: (_) => ChatPage(
-            initialDestination: SidebarDestination.totalEntries,
-            newlyAddedStudent: result,
+      await StudentRepository.addStudent(result);
+      if (mounted) {
+        Navigator.of(context).push(
+          MaterialPageRoute(
+            builder: (_) => ChatPage(
+              initialDestination: SidebarDestination.totalEntries,
+              newlyAddedStudent: result,
+            ),
           ),
-        ),
-      );
+        );
+      }
     }
   }
 
@@ -235,13 +205,20 @@ class _TopBar extends StatelessWidget {
                 ),
               ],
             ),
-            child: Center(
-              child: Text(AppConfig.appName.isNotEmpty ? AppConfig.appName[0] : 'A',
-                  style: const TextStyle(
-                      color: Colors.white,
-                      fontSize: 20,
-                      fontWeight: FontWeight.w900,
-                      letterSpacing: -1)),
+            child: ClipRRect(
+              borderRadius: BorderRadius.circular(10),
+              child: Image.asset(
+                'assets/images/logo.png',
+                fit: BoxFit.contain,
+                errorBuilder: (ctx, err, stack) => Center(
+                  child: Text(AppConfig.appName.isNotEmpty ? AppConfig.appName[0] : 'N',
+                      style: const TextStyle(
+                          color: Colors.white,
+                          fontSize: 16,
+                          fontWeight: FontWeight.w900,
+                          letterSpacing: -1)),
+                ),
+              ),
             ),
           ),
           const SizedBox(width: 10),
@@ -255,7 +232,7 @@ class _TopBar extends StatelessWidget {
                       text: 'NIFT ',
                       style: const TextStyle(
                         color: Colors.blueAccent,
-                        fontSize: 18,
+                        fontSize: 15,
                         fontWeight: FontWeight.w900,
                         letterSpacing: -0.3,
                       ),
@@ -264,7 +241,7 @@ class _TopBar extends StatelessWidget {
                       text: 'Hostel Shillong',
                       style: TextStyle(
                         color: ChatPalette.isDark ? Colors.white : Colors.black,
-                        fontSize: 18,
+                        fontSize: 15,
                         fontWeight: FontWeight.w800,
                         letterSpacing: -0.3,
                       ),
@@ -272,7 +249,7 @@ class _TopBar extends StatelessWidget {
                   ],
                 ),
               ),
-              const Text('Smart Management System (OTA Patch V1)',
+              const Text('Smart Management System',
                   style: TextStyle(color: Pal.textDim, fontSize: 11, fontWeight: FontWeight.w500)),
             ],
           ),
@@ -364,13 +341,7 @@ class _TopBar extends StatelessWidget {
   }
 
   String get _initials {
-    final user = Supabase.instance.client.auth.currentUser;
-    final meta = user?.userMetadata ?? {};
-    final name = meta['full_name']?.toString() ?? meta['name']?.toString() ?? user?.email ?? '';
-    if (name.isEmpty) return 'A';
-    final parts = name.trim().split(' ').where((p) => p.isNotEmpty).toList();
-    if (parts.length >= 2) return '${parts[0][0]}${parts[1][0]}'.toUpperCase();
-    return parts[0][0].toUpperCase();
+    return 'W';
   }
 }
 
@@ -397,7 +368,7 @@ class _WelcomeBanner extends StatelessWidget {
           Text('Hostel Dashboard',
               style: const TextStyle(
                   color: Pal.text,
-                  fontSize: 28,
+                  fontSize: 20,
                   fontWeight: FontWeight.w900,
                   letterSpacing: -1.0, height: 1.1))
               .animate()
@@ -425,12 +396,10 @@ class _WelcomeBanner extends StatelessWidget {
 class _StatsRow extends StatelessWidget {
   final int totalStudents;
   final int occupiedRooms;
-  final int pendingIssues;
 
   const _StatsRow({
     required this.totalStudents,
     required this.occupiedRooms,
-    required this.pendingIssues,
   });
 
   @override
@@ -438,7 +407,6 @@ class _StatsRow extends StatelessWidget {
     final stats = [
       _Stat(totalStudents.toString(), 'Students', Pal.indigo, Icons.people_outline, Pal.indigo10),
       _Stat(occupiedRooms.toString(), 'Occupied', Pal.teal, Icons.bed_outlined, Pal.teal10),
-      _Stat(pendingIssues.toString(), 'Pending', Pal.amber, Icons.hourglass_top_rounded, Pal.amber10),
     ];
 
     return Padding(
@@ -478,7 +446,7 @@ class _StatsRow extends StatelessWidget {
                   Text(s.value,
                       style: TextStyle(
                           color: s.color,
-                          fontSize: 24,
+                          fontSize: 18,
                           fontWeight: FontWeight.w900,
                           letterSpacing: -0.5)),
                   const SizedBox(height: 2),
@@ -554,7 +522,7 @@ class _HeroScanCard extends StatelessWidget {
                     const Text('Scan New\nStudent Form',
                         style: TextStyle(
                             color: Colors.white,
-                            fontSize: 22,
+                            fontSize: 17,
                             fontWeight: FontWeight.w900,
                             height: 1.2,
                             letterSpacing: -0.5)),
@@ -605,7 +573,7 @@ class _HeroScanCard extends StatelessWidget {
                       border: Border.all(color: Colors.white.withValues(alpha: 0.2)),
                     ),
                     child: const Icon(Icons.document_scanner_outlined,
-                        color: Colors.white, size: 36),
+                        color: Colors.white, size: 28),
                   )
                       .animate(onPlay: (c) => c.repeat(reverse: true))
                       .scaleXY(begin: 1, end: 1.06, duration: 1800.ms, curve: Curves.easeInOut),
@@ -768,7 +736,7 @@ class _RecentSection extends StatelessWidget {
             children: [
               const Text('Recent Entries',
                   style: TextStyle(
-                      color: Pal.text, fontSize: 16, fontWeight: FontWeight.w800)),
+                      color: Pal.text, fontSize: 14, fontWeight: FontWeight.w800)),
               Text('See all',
                   style: TextStyle(
                       color: Pal.indigoLight,

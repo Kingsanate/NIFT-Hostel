@@ -1,10 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_animate/flutter_animate.dart';
-import 'package:supabase_flutter/supabase_flutter.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'chat/chat_page.dart';
 import 'auth/login_page.dart';
 import 'core/palette.dart';
-
 import 'main.dart'; // For AppConfig
 
 class SplashScreen extends StatefulWidget {
@@ -22,22 +21,28 @@ class _SplashScreenState extends State<SplashScreen> {
   }
 
   Future<void> _checkAuthAndNavigate() async {
-    // Allow splash animation to be seen (1.4 s) then check session and load config
-    await Future.wait([
-      Future.delayed(const Duration(milliseconds: 1400)),
-      AppConfig.loadFromSupabase(),
-    ]);
+    // Check local session immediately
+    final prefs = await SharedPreferences.getInstance();
+    final token = prefs.getString('auth_token');
+    
+    // Background config sync
+    AppConfig.loadFromOracle();
+
+    // Snappy splash duration (300ms)
+    await Future.delayed(const Duration(milliseconds: 300));
     if (!mounted) return;
 
-    final session = Supabase.instance.client.auth.currentSession;
-    final Widget destination = session != null ? const ChatPage() : const LoginPage();
+    final Widget destination = (token != null && token.isNotEmpty)
+        ? const ChatPage()
+        : const LoginPage();
 
+    if (!mounted) return;
     Navigator.of(context).pushReplacement(
       PageRouteBuilder(
         pageBuilder: (ctx, animation, secondary) => destination,
         transitionsBuilder: (ctx, animation, secondary, child) =>
             FadeTransition(opacity: animation, child: child),
-        transitionDuration: const Duration(milliseconds: 700),
+        transitionDuration: const Duration(milliseconds: 250),
       ),
     );
   }
@@ -109,13 +114,13 @@ class _SplashScreenState extends State<SplashScreen> {
                       child: Padding(
                         padding: const EdgeInsets.all(16),
                         child: Image.asset(
-                          'assets/images/nift_logo.png',
+                          'assets/images/logo.png',
                           fit: BoxFit.contain,
                           errorBuilder: (ctx, obj, err) => const Center(
                             child: Text(
                               'NIFT',
                               style: TextStyle(
-                                fontSize: 28,
+                                fontSize: 20,
                                 fontWeight: FontWeight.w900,
                                 color: Pal.indigoLight,
                                 letterSpacing: 1,
@@ -140,7 +145,7 @@ class _SplashScreenState extends State<SplashScreen> {
                   child: const Text(
                     'NIFT Hostel',
                     style: TextStyle(
-                      fontSize: 34,
+                      fontSize: 24,
                       fontWeight: FontWeight.w900,
                       color: Colors.white,
                       letterSpacing: 1.2,

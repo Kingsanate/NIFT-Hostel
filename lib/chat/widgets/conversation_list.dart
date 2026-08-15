@@ -5,7 +5,7 @@ import '../chat_palette.dart';
 import '../../profile/profile_page.dart';
 import '../../settings/settings_page.dart';
 
-enum SidebarDestination { newChat, hostellerEntry, totalEntries, events, rules, attendance }
+enum SidebarDestination { newChat, hostellerEntry, totalEntries, lateEntry, rules, attendance }
 
 class ConversationList extends StatelessWidget {
   final SidebarDestination selectedDestination;
@@ -13,7 +13,7 @@ class ConversationList extends StatelessWidget {
   final VoidCallback onNewChat;
   final VoidCallback onHostellerEntry;
   final VoidCallback onTotalEntries;
-  final VoidCallback onEvents;
+  final VoidCallback onLateEntry;
   final VoidCallback onRules;
   final VoidCallback onAttendance;
   final VoidCallback? onClose;
@@ -25,7 +25,7 @@ class ConversationList extends StatelessWidget {
     required this.onNewChat,
     required this.onHostellerEntry,
     required this.onTotalEntries,
-    required this.onEvents,
+    required this.onLateEntry,
     required this.onRules,
     required this.onAttendance,
     this.onClose,
@@ -69,11 +69,11 @@ class ConversationList extends StatelessWidget {
           onTap: onAttendance,
         ),
         _NavItem(
-          icon: Icons.event_note_outlined,
-          label: 'Events',
-          gradient: ChatPalette.gradientAmber,
-          selected: selectedDestination == SidebarDestination.events,
-          onTap: onEvents,
+          icon: Icons.schedule_rounded,
+          label: 'Late Entry / Leave Approved',
+          gradient: ChatPalette.gradientRose,
+          selected: selectedDestination == SidebarDestination.lateEntry,
+          onTap: onLateEntry,
         ),
         _NavItem(
           icon: Icons.gavel_outlined,
@@ -124,7 +124,7 @@ class _SidebarHeader extends StatelessWidget {
             child: ClipRRect(
               borderRadius: BorderRadius.circular(11),
               child: Image.asset(
-                'assets/images/nift_logo.png',
+                'assets/images/logo.png',
                 width: 36,
                 height: 36,
                 fit: BoxFit.cover,
@@ -132,7 +132,7 @@ class _SidebarHeader extends StatelessWidget {
                   child: Text(AppConfig.appName.isNotEmpty ? AppConfig.appName[0] : 'A',
                       style: const TextStyle(
                           color: Colors.white,
-                          fontSize: 18,
+                          fontSize: 16,
                           fontWeight: FontWeight.w900,
                           letterSpacing: -1)),
                 ),
@@ -352,6 +352,8 @@ class _NavItemState extends State<_NavItem> {
               SizedBox(width: 10),
               Expanded(
                 child: Text(widget.label,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
                     style: TextStyle(
                         color: _hovered
                             ? Colors.white

@@ -52,6 +52,7 @@ app.*.map.json
 hs_err_pid*.log
 
 # Analysis / test artifacts
+analyze.txt
 analyze_output.txt
 test_gemini.js
 openapi.json
@@ -61,3 +62,10 @@ openapi.json
 /android/build/
 /android/.gradle/
 android/local.properties
+
+# wrangler files
+.wrangler
+.dev.vars*
+!.dev.vars.example
+.env*
+!.env.example
