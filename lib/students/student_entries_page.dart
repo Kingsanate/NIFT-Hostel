@@ -1616,7 +1616,7 @@ Hostel: ${s.hostel}
                     child: GestureDetector(
                       onTap: _openStudentRecord,
                       child: Container(
-                        padding: const EdgeInsets.symmetric(vertical: 10),
+                        padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 6),
                         decoration: BoxDecoration(
                           color: ChatPalette.surface,
                           borderRadius: BorderRadius.circular(10),
@@ -1636,13 +1636,18 @@ Hostel: ${s.hostel}
                           children: [
                             Icon(Icons.folder_shared_rounded,
                                 color: ChatPalette.accent, size: 15),
-                            const SizedBox(width: 6),
-                            Text(
-                              'Student Record',
-                              style: TextStyle(
-                                color: ChatPalette.accent,
-                                fontSize: 12,
-                                fontWeight: FontWeight.w700,
+                            const SizedBox(width: 5),
+                            Flexible(
+                              child: Text(
+                                'Student Record',
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                textAlign: TextAlign.center,
+                                style: TextStyle(
+                                  color: ChatPalette.accent,
+                                  fontSize: 11.5,
+                                  fontWeight: FontWeight.w700,
+                                ),
                               ),
                             ),
                           ],
@@ -1663,7 +1668,7 @@ Hostel: ${s.hostel}
                         }
                       },
                       child: Container(
-                        padding: const EdgeInsets.symmetric(vertical: 10),
+                        padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 6),
                         decoration: BoxDecoration(
                           color: isBooked
                               ? ChatPalette.accentRose.withValues(alpha: 0.08)
@@ -1695,19 +1700,22 @@ Hostel: ${s.hostel}
                                   : ChatPalette.accentBlue,
                               size: 15,
                             ),
-                            const SizedBox(width: 6),
-                            Text(
-                              isBooked
-                                  ? 'Cancel Booking'
-                                  : 'Book for Doctor & Counselor',
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
-                              style: TextStyle(
-                                color: isBooked
-                                    ? ChatPalette.accentRose
-                                    : ChatPalette.accentBlue,
-                                fontSize: 11.5,
-                                fontWeight: FontWeight.w700,
+                            const SizedBox(width: 5),
+                            Flexible(
+                              child: Text(
+                                isBooked
+                                    ? 'Cancel Booking'
+                                    : 'Doctor / Counselor',
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                textAlign: TextAlign.center,
+                                style: TextStyle(
+                                  color: isBooked
+                                      ? ChatPalette.accentRose
+                                      : ChatPalette.accentBlue,
+                                  fontSize: 11.5,
+                                  fontWeight: FontWeight.w700,
+                                ),
                               ),
                             ),
                           ],
@@ -1844,7 +1852,7 @@ class _CardActionBtn extends StatelessWidget {
   Widget build(BuildContext context) => GestureDetector(
         onTap: onTap,
         child: Container(
-          padding: const EdgeInsets.symmetric(vertical: 8),
+          padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 4),
           decoration: BoxDecoration(
             color: color.withValues(alpha: 0.1),
             borderRadius: BorderRadius.circular(10),
@@ -1859,12 +1867,19 @@ class _CardActionBtn extends StatelessWidget {
           ),
           child: Row(mainAxisAlignment: MainAxisAlignment.center, children: [
             Icon(icon, color: color, size: 12),
-            const SizedBox(width: 4),
-            Text(label,
+            const SizedBox(width: 3),
+            Flexible(
+              child: Text(
+                label,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
                 style: TextStyle(
-                    color: color,
-                    fontSize: 11,
-                    fontWeight: FontWeight.w700)),
+                  color: color,
+                  fontSize: 11,
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+            ),
           ]),
         ),
       );

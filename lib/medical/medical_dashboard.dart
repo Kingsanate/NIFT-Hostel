@@ -682,6 +682,8 @@ class _QueueCardState extends State<_QueueCard> {
                 children: [
                   Text(
                     widget.apt['student_name'] ?? 'Unknown',
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
                     style: const TextStyle(
                       color: Color(0xFF1A202C),
                       fontSize: 14,
@@ -691,6 +693,8 @@ class _QueueCardState extends State<_QueueCard> {
                   const SizedBox(height: 4),
                   Text(
                     widget.apt['department'] ?? 'Unknown Dept',
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
                     style: const TextStyle(
                       color: Color(0xFF718096),
                       fontSize: 13,
