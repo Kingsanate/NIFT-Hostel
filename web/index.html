@@ -26,16 +26,46 @@
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black">
   <meta name="apple-mobile-web-app-title" content="NIFT Hostel">
-  <link rel="apple-touch-icon" href="icons/Icon-192.png">
+  <link rel="apple-touch-icon" sizes="192x192" href="icons/Icon-192.png?v=3">
 
-  <!-- Favicon -->
-  <link rel="icon" type="image/png" href="favicon.png"/>
+  <!-- Favicons & App Icons (cache-busting ?v=3 forces browser to drop cached Flutter logo) -->
+  <link rel="icon" type="image/x-icon" href="favicon.ico?v=3">
+  <link rel="shortcut icon" type="image/x-icon" href="favicon.ico?v=3">
+  <link rel="icon" type="image/png" sizes="32x32" href="favicon.png?v=3">
+  <link rel="icon" type="image/png" sizes="192x192" href="icons/Icon-192.png?v=3">
+  <meta name="theme-color" content="#0F1117">
 
   <title>NIFT Hostel — Smart Student Management</title>
-  <link rel="manifest" href="manifest.json">
+  <link rel="manifest" href="manifest.json?v=3">
+
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="preconnect" href="https://cdnjs.cloudflare.com">
 
   <style>
     html, body { margin: 0; padding: 0; background: #EEF0F4; }
+    #loading-indicator {
+      position: fixed;
+      inset: 0;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      background: #EEF0F4;
+      transition: opacity 0.2s ease;
+      z-index: 99999;
+    }
+    .loader-spinner {
+      width: 36px;
+      height: 36px;
+      border: 3.5px solid rgba(29, 78, 216, 0.15);
+      border-top-color: #1D4ED8;
+      border-radius: 50%;
+      animation: nift-spin 0.65s linear infinite;
+    }
+    @keyframes nift-spin {
+      to { transform: rotate(360deg); }
+    }
   </style>
 
   <!-- PDF.js: required for the `printing` package to render PDF previews on web. Deferred so it never blocks app startup. -->
@@ -43,6 +73,10 @@
   <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.2.146/pdf.min.js" defer></script>
 </head>
 <body>
+  <div id="loading-indicator">
+    <div class="loader-spinner"></div>
+  </div>
+
   <!--
     You can customize the "flutter_bootstrap.js" script.
     This is useful to provide a custom configuration to the Flutter loader
@@ -52,5 +86,14 @@
     * https://docs.flutter.dev/platform-integration/web/initialization
   -->
   <script src="flutter_bootstrap.js" async></script>
+  <script>
+    window.addEventListener('flutter-first-frame', function () {
+      var loader = document.getElementById('loading-indicator');
+      if (loader) {
+        loader.style.opacity = '0';
+        setTimeout(function () { loader.remove(); }, 200);
+      }
+    });
+  </script>
 </body>
 </html>

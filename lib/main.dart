@@ -78,40 +78,49 @@ void main() async {
   final prefs = await SharedPreferences.getInstance();
   darkModeNotifier.value = prefs.getBool('darkMode') ?? false;
 
-  // Initialize Native High-Speed Real-Time WebSockets
-  WebSocketService.instance.connect();
+  // Check auth session immediately for zero-delay startup
+  final token = prefs.getString('auth_token');
+  final bool isLoggedIn = (token != null && token.isNotEmpty);
 
-  try {
-    await NotificationService().init();
-  } catch (e) {
-    debugPrint('Failed to initialize notifications: $e');
-  }
+  // Run the app wrapped in ProviderScope for Riverpod IMMEDIATELY (0ms delay)
+  runApp(ProviderScope(child: NiftHostelApp(isLoggedIn: isLoggedIn)));
 
+  // Initialize background services asynchronously WITHOUT blocking UI rendering
+  _initBackgroundServices();
+}
+
+void _initBackgroundServices() async {
   SystemChrome.setSystemUIOverlayStyle(const SystemUiOverlayStyle(
     statusBarColor: Colors.transparent,
     statusBarIconBrightness: Brightness.dark,
   ));
 
-  await Hive.initFlutter();
-  await Hive.openBox('appConfig');
-
-  // Initialize WhatsApp-style instant in-memory Student repository & Record Cache
+  // 1. Native High-Speed Real-Time WebSockets
   try {
+    WebSocketService.instance.connect();
+  } catch (e) {
+    debugPrint('WebSocket init error: $e');
+  }
+
+  // 2. Notifications (non-blocking)
+  try {
+    NotificationService().init();
+  } catch (e) {
+    debugPrint('Notification init error: $e');
+  }
+
+  // 3. Local Hive storage & repositories (non-blocking)
+  try {
+    await Hive.initFlutter();
+    await Hive.openBox('appConfig');
     await StudentRepository.init();
     await StudentRecordCache.init();
   } catch (e) {
-    debugPrint('Failed to initialize caches: $e');
+    debugPrint('Storage init error: $e');
   }
 
-  // Background non-blocking config sync
+  // 4. Background dynamic config sync
   AppConfig.loadFromOracle();
-
-  // Check auth session immediately for zero-delay startup (no splash screen)
-  final token = prefs.getString('auth_token');
-  final bool isLoggedIn = (token != null && token.isNotEmpty);
-
-  // Run the app wrapped in ProviderScope for Riverpod
-  runApp(ProviderScope(child: NiftHostelApp(isLoggedIn: isLoggedIn)));
 }
 
 class NiftHostelApp extends ConsumerWidget {
