@@ -129,7 +129,7 @@ class _LoginPageState extends State<LoginPage> with TickerProviderStateMixin {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: const Color(0xFF080C14),
+      backgroundColor: ChatPalette.background,
       body: Stack(
         children: [
           // ── Animated gradient background orbs ──
@@ -252,7 +252,7 @@ class _LoginPageState extends State<LoginPage> with TickerProviderStateMixin {
                                 ),
                               ).animate().fadeIn(duration: 300.ms).shakeX(),
 
-                            const SizedBox(height: 8),
+                            const SizedBox(height: 16),
 
                             // Sign In button
                             _SignInButton(
@@ -291,23 +291,23 @@ class _LoginPageState extends State<LoginPage> with TickerProviderStateMixin {
     return Column(
       children: [
         Container(
-          width: 120,
-          height: 120,
+          width: 110,
+          height: 110,
           padding: const EdgeInsets.all(4),
           decoration: BoxDecoration(
             shape: BoxShape.circle,
             color: Colors.white,
-            border: Border.all(color: Colors.white.withValues(alpha: 0.2), width: 3),
+            border: Border.all(color: ChatPalette.border, width: 2),
             boxShadow: [
               BoxShadow(
-                color: ChatPalette.accent.withValues(alpha: 0.4),
-                blurRadius: 50,
-                spreadRadius: 10,
+                color: ChatPalette.accent.withValues(alpha: 0.15),
+                blurRadius: 30,
+                spreadRadius: 2,
               ),
               BoxShadow(
-                color: Colors.black.withValues(alpha: 0.5),
+                color: Colors.black.withValues(alpha: 0.05),
                 blurRadius: 10,
-                spreadRadius: 2,
+                offset: const Offset(0, 4),
               ),
             ],
           ),
@@ -337,32 +337,29 @@ class _LoginPageState extends State<LoginPage> with TickerProviderStateMixin {
             .animate()
             .scale(duration: 800.ms, curve: Curves.easeOutBack)
             .fadeIn(duration: 600.ms),
-        const SizedBox(height: 24),
+        const SizedBox(height: 20),
         Text(
           'NIFT Hostel',
           style: TextStyle(
-            color: Colors.white,
+            color: ChatPalette.text,
             fontSize: 24,
             fontWeight: FontWeight.w900,
             letterSpacing: 1.2,
-            shadows: [
-              Shadow(color: Colors.black54, blurRadius: 10, offset: Offset(0, 4)),
-            ],
           ),
         ).animate(delay: 200.ms).fadeIn(duration: 500.ms).slideY(begin: 0.4),
         const SizedBox(height: 6),
         Container(
           padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
           decoration: BoxDecoration(
-            color: ChatPalette.accent.withValues(alpha: 0.15),
+            color: ChatPalette.accent.withValues(alpha: 0.1),
             borderRadius: BorderRadius.circular(20),
-            border: Border.all(color: ChatPalette.accent.withValues(alpha: 0.3)),
+            border: Border.all(color: ChatPalette.accent.withValues(alpha: 0.25)),
           ),
           child: Text(
             'SHILLONG',
             style: TextStyle(
-              color: const Color(0xFF4FC3F7), // Bright blue
-              fontSize: 14,
+              color: ChatPalette.accent,
+              fontSize: 13,
               fontWeight: FontWeight.w800,
               letterSpacing: 4,
             ),
@@ -386,21 +383,16 @@ class _GlassCard extends StatelessWidget {
       constraints: const BoxConstraints(maxWidth: 420),
       padding: const EdgeInsets.all(28),
       decoration: BoxDecoration(
-        color: ChatPalette.canvas.withValues(alpha: 0.85),
+        color: ChatPalette.surface,
         borderRadius: BorderRadius.circular(24),
         border: Border.all(
-          color: ChatPalette.border.withValues(alpha: 0.6),
+          color: ChatPalette.border,
         ),
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withValues(alpha: 0.4),
-            blurRadius: 60,
-            offset: const Offset(0, 20),
-          ),
-          BoxShadow(
-            color: ChatPalette.accent.withValues(alpha: 0.06),
-            blurRadius: 60,
-            spreadRadius: -10,
+            color: Colors.black.withValues(alpha: 0.05),
+            blurRadius: 24,
+            offset: const Offset(0, 8),
           ),
         ],
       ),
