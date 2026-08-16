@@ -169,15 +169,17 @@ class _LeaveApprovalDetailPageState extends State<LeaveApprovalDetailPage> {
                             'Attached Leave Form',
                             style: TextStyle(
                                 color: ChatPalette.text,
-                                fontSize: 15,
+                                fontSize: 16.5,
                                 fontWeight: FontWeight.w800,
                                 letterSpacing: -0.2),
                           ),
-                          const SizedBox(height: 2),
+                          const SizedBox(height: 3),
                           Text(
                             'Submitted on ${DateFormat('dd MMM yyyy, hh:mm a').format(_record.appliedAt)}',
                             style: TextStyle(
-                                color: ChatPalette.muted, fontSize: 12),
+                                color: ChatPalette.muted,
+                                fontSize: 13,
+                                fontWeight: FontWeight.w500),
                           ),
                         ],
                       ),
@@ -217,16 +219,15 @@ class _LeaveApprovalDetailPageState extends State<LeaveApprovalDetailPage> {
 
   Widget _buildProfileCard() {
     return Container(
-      padding: const EdgeInsets.all(16),
+      padding: const EdgeInsets.fromLTRB(18, 18, 18, 20),
       decoration: BoxDecoration(
-        color: ChatPalette.surface,
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: ChatPalette.border),
+        color: const Color(0xFF8FAEE8),
+        borderRadius: BorderRadius.circular(22),
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withValues(alpha: 0.03),
-            blurRadius: 10,
-            offset: const Offset(0, 2),
+            color: const Color(0xFF8FAEE8).withValues(alpha: 0.35),
+            blurRadius: 16,
+            offset: const Offset(0, 4),
           ),
         ],
       ),
@@ -234,15 +235,23 @@ class _LeaveApprovalDetailPageState extends State<LeaveApprovalDetailPage> {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Row(
+            crossAxisAlignment: CrossAxisAlignment.center,
             children: [
-              StudentAvatar(
-                photoBase64: _displayPhoto,
-                fallbackIcon: _displayName.toLowerCase().contains('g') &&
-                        _displayHostel.contains('Girls')
-                    ? Icons.girl_rounded
-                    : Icons.person_rounded,
-                fallbackColor: ChatPalette.accentDeep,
-                size: 52,
+              Container(
+                decoration: BoxDecoration(
+                  shape: BoxShape.circle,
+                  border: Border.all(
+                      color: Colors.white.withValues(alpha: 0.5), width: 1.5),
+                ),
+                child: StudentAvatar(
+                  photoBase64: _displayPhoto,
+                  fallbackIcon: _displayName.toLowerCase().contains('g') &&
+                          _displayHostel.contains('Girls')
+                      ? Icons.girl_rounded
+                      : Icons.person_rounded,
+                  fallbackColor: const Color(0xFF1E3A8A),
+                  size: 50,
+                ),
               ),
               const SizedBox(width: 14),
               Expanded(
@@ -250,48 +259,48 @@ class _LeaveApprovalDetailPageState extends State<LeaveApprovalDetailPage> {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text(
-                      _displayName,
+                      _displayName.toUpperCase(),
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
-                      style: TextStyle(
-                          color: ChatPalette.text,
-                          fontSize: 16,
-                          fontWeight: FontWeight.w800,
-                          letterSpacing: -0.2),
+                      style: const TextStyle(
+                        color: Color(0xFF0F172A),
+                        fontSize: 16.5,
+                        fontWeight: FontWeight.w800,
+                        letterSpacing: 0.2,
+                      ),
                     ),
-                    const SizedBox(height: 2),
+                    const SizedBox(height: 3),
                     Text(
                       _displayRoll,
-                      style: TextStyle(
-                          color: ChatPalette.accentDeep,
-                          fontSize: 12.5,
-                          fontWeight: FontWeight.w700),
+                      style: const TextStyle(
+                        color: Color(0xFF1D4ED8),
+                        fontSize: 13.5,
+                        fontWeight: FontWeight.w700,
+                        letterSpacing: 0.2,
+                      ),
                     ),
                   ],
                 ),
               ),
               Container(
                 padding:
-                    const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                    const EdgeInsets.symmetric(horizontal: 13, vertical: 5),
                 decoration: BoxDecoration(
-                  color: ChatPalette.accentGreen.withValues(alpha: 0.12),
-                  borderRadius: BorderRadius.circular(8),
-                  border: Border.all(
-                      color: ChatPalette.accentGreen.withValues(alpha: 0.3)),
+                  color: const Color(0xFF6EE7B7).withValues(alpha: 0.4),
+                  borderRadius: BorderRadius.circular(20),
                 ),
-                child: Text(
-                  'Approved',
+                child: const Text(
+                  'Active',
                   style: TextStyle(
-                      color: ChatPalette.accentGreen,
-                      fontSize: 11,
-                      fontWeight: FontWeight.w800),
+                    color: Color(0xFF065F46),
+                    fontSize: 12,
+                    fontWeight: FontWeight.w700,
+                  ),
                 ),
               ),
             ],
           ),
-          const SizedBox(height: 16),
-          Divider(color: ChatPalette.borderSoft, height: 1),
-          const SizedBox(height: 12),
+          const SizedBox(height: 18),
           _InfoRow(label: 'Department', value: _displayDept),
           _InfoRow(label: 'Semester', value: _displaySem),
           _InfoRow(label: 'Room', value: _displayRoom),
@@ -698,27 +707,30 @@ class _InfoRow extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Padding(
-      padding: const EdgeInsets.only(bottom: 8),
+      padding: const EdgeInsets.only(bottom: 10),
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           SizedBox(
-            width: 90,
+            width: 105,
             child: Text(
               label,
               style: TextStyle(
-                  color: ChatPalette.muted,
-                  fontSize: 11.5,
-                  fontWeight: FontWeight.w600),
+                color: const Color(0xFF1E293B).withValues(alpha: 0.8),
+                fontSize: 13.5,
+                fontWeight: FontWeight.w600,
+              ),
             ),
           ),
           Expanded(
             child: Text(
               value.isEmpty ? '—' : value,
-              style: TextStyle(
-                  color: ChatPalette.text,
-                  fontSize: 12.5,
-                  fontWeight: FontWeight.w600),
+              style: const TextStyle(
+                color: Color(0xFF0F172A),
+                fontSize: 14,
+                fontWeight: FontWeight.w600,
+                height: 1.3,
+              ),
             ),
           ),
         ],
