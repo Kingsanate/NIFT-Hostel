@@ -1,4 +1,4 @@
-﻿import 'package:flutter/foundation.dart' show kIsWeb;
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:flutter_animate/flutter_animate.dart';
 import 'package:image_picker/image_picker.dart';
@@ -102,13 +102,26 @@ class _ScannerPageState extends State<ScannerPage>
 
   Future<void> _takeLivePhoto() async {
     if (_picking) return;
-    // On web there is no live camera controller — redirect to file upload.
-    if (kIsWeb) {
-      await _pickGallery();
-      return;
-    }
     setState(() => _picking = true);
     try {
+      if (kIsWeb) {
+        final file = await ImagePicker().pickImage(
+          source: ImageSource.camera,
+        );
+        if (file != null && mounted) {
+          final bytes = await file.readAsBytes();
+          if (!mounted) return;
+          final result = await Navigator.of(context).push<StudentModel>(
+            _slideRoute(ProcessingPage(
+              imagePath: file.path,
+              imageBytes: bytes,
+              selectedHostel: widget.selectedHostel,
+            )),
+          );
+          if (result != null && mounted) Navigator.of(context).pop(result);
+        }
+        return;
+      }
       if (_cameraController != null && _cameraController!.value.isInitialized) {
         final file = await _cameraController!.takePicture();
         if (mounted) {

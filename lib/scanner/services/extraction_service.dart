@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'package:flutter/foundation.dart';
 import 'dart:convert';
+import 'package:http/http.dart' as http;
 import 'package:image/image.dart' as img;
 import '../../main.dart'; // For AppConfig
 import 'package:google_generative_ai/google_generative_ai.dart';
@@ -33,7 +34,7 @@ class ExtractionService {
     }
   }
 
-  /// Ultra-fast extraction sending cropped native JPEG directly to Gemini Vision
+  /// Ultra-fast extraction sending optimized JPEG to Gemini Vision
   Future<StudentModel> extractFromImage({
     required String imagePath,
     required Uint8List imageBytes,
@@ -41,8 +42,8 @@ class ExtractionService {
   }) async {
     try {
       final sw = Stopwatch()..start();
-      
-      final imagePart = DataPart('image/jpeg', _optimizeForGemini(imageBytes));
+      final optimizedBytes = _optimizeForGemini(imageBytes);
+      final base64Image = base64Encode(optimizedBytes);
 
       String name = 'Unknown';
       String rollNo = 'Unknown';
@@ -50,51 +51,30 @@ class ExtractionService {
       String dept = 'Unknown';
       String contact = 'Unknown';
       String email = 'Unknown';
+      String extractedSem = 'Semester 1';
 
-      // Fast Multimodal JSON Extraction via Gemini.
-      // All keys are tried IN PARALLEL and the first success wins,
-      // so a slow/failing key never delays the result.
-      if (AppConfig.scannerKeys.isNotEmpty) {
-        final prompt = TextPart('Extract the student details from this form or ID card image. Read handwriting and printed text carefully. Return ONLY a valid JSON object with the exact keys: "name", "rollNo", "dob", "department", "semester", "contact", "email". If a field is missing, use "Unknown".');
+      final keys = (AppConfig.scannerKeys.isNotEmpty)
+          ? AppConfig.scannerKeys
+          : apiKeys;
 
-        final responses = await Future.wait(
-          AppConfig.scannerKeys.map((geminiKey) async {
-            try {
-              final model = GenerativeModel(
-                model: 'gemini-flash-latest',
-                apiKey: geminiKey,
-                generationConfig: GenerationConfig(
-                  temperature: 0.1,
-                  responseMimeType: 'application/json',
-                ),
-              );
-              return await model.generateContent([
-                Content.multi([prompt, imagePart])
-              ]).timeout(const Duration(seconds: 15));
-            } catch (e) {
-              debugPrint('Gemini Vision parsing failed for key: $e');
-              return null;
-            }
-          }),
-        );
+      if (keys.isNotEmpty) {
+        const promptText = 'Extract the student details from this form or ID card image. Read handwriting and printed text carefully. Return ONLY a valid JSON object with the exact keys: "name", "rollNo", "dob", "department", "semester", "contact", "email". If a field is missing, use "Unknown".';
 
-        for (final response in responses) {
-          if (response == null ||
-              response.text == null ||
-              response.text!.isEmpty) {
-            continue;
-          }
-          try {
-            String content =
-                response.text!.replaceAll('```json', '').replaceAll('```', '').trim();
-            final parsed = jsonDecode(content);
+        // 1. Try parallel Google Generative AI with gemini-2.5-flash & gemini-flash-latest
+        final futures = <Future<Map<String, dynamic>?>>[];
+        for (final geminiKey in keys) {
+          futures.add(_extractViaRest(geminiKey, base64Image, promptText));
+          futures.add(_extractViaSdk(geminiKey, optimizedBytes, promptText));
+        }
 
+        final parsedResults = await Future.wait(futures);
+        for (final parsed in parsedResults) {
+          if (parsed != null && (parsed['name'] != null || parsed['rollNo'] != null)) {
             name = parsed['name']?.toString() ?? 'Unknown';
             rollNo = parsed['rollNo']?.toString() ?? 'Unknown';
             dob = parsed['dob']?.toString() ?? 'Unknown';
             dept = parsed['department']?.toString() ?? 'Unknown';
-            String extractedSem =
-                parsed['semester']?.toString() ?? parsed['year']?.toString() ?? '';
+            extractedSem = parsed['semester']?.toString() ?? parsed['year']?.toString() ?? 'Semester 1';
             contact = parsed['contact']?.toString() ?? 'Unknown';
             email = parsed['email']?.toString() ?? 'Unknown';
 
@@ -121,18 +101,87 @@ class ExtractionService {
               photoPath: imagePath,
               createdAt: DateTime.now(),
             );
-          } catch (e) {
-            debugPrint('Gemini response parse failed: $e');
           }
         }
       }
 
       throw Exception('All Gemini keys failed to extract the image.');
-
     } catch (e) {
       debugPrint('Local Extraction Error: $e');
-      throw Exception('Failed to process image locally: $e');
+      throw Exception('Failed to process image: $e');
     }
+  }
+
+  Future<Map<String, dynamic>?> _extractViaSdk(
+      String geminiKey, Uint8List bytes, String promptText) async {
+    try {
+      final imagePart = DataPart('image/jpeg', bytes);
+      final prompt = TextPart(promptText);
+      final model = GenerativeModel(
+        model: 'gemini-2.5-flash',
+        apiKey: geminiKey,
+        generationConfig: GenerationConfig(
+          temperature: 0.1,
+          responseMimeType: 'application/json',
+        ),
+      );
+      final response = await model.generateContent([
+        Content.multi([prompt, imagePart])
+      ]).timeout(const Duration(seconds: 12));
+
+      if (response.text != null && response.text!.isNotEmpty) {
+        String content = response.text!.replaceAll('```json', '').replaceAll('```', '').trim();
+        return jsonDecode(content) as Map<String, dynamic>;
+      }
+    } catch (e) {
+      debugPrint('SDK extraction error: $e');
+    }
+    return null;
+  }
+
+  Future<Map<String, dynamic>?> _extractViaRest(
+      String geminiKey, String base64Image, String promptText) async {
+    try {
+      final url = Uri.parse(
+          'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=$geminiKey');
+      final res = await http.post(
+        url,
+        headers: {'Content-Type': 'application/json'},
+        body: jsonEncode({
+          'contents': [
+            {
+              'role': 'user',
+              'parts': [
+                {'text': promptText},
+                {
+                  'inline_data': {
+                    'mime_type': 'image/jpeg',
+                    'data': base64Image,
+                  }
+                }
+              ]
+            }
+          ],
+          'generationConfig': {
+            'temperature': 0.1,
+            'response_mime_type': 'application/json'
+          }
+        }),
+      ).timeout(const Duration(seconds: 12));
+
+      if (res.statusCode == 200) {
+        final data = jsonDecode(res.body);
+        final rawText =
+            data['candidates']?[0]?['content']?['parts']?[0]?['text']?.toString() ?? '';
+        if (rawText.isNotEmpty) {
+          String content = rawText.replaceAll('```json', '').replaceAll('```', '').trim();
+          return jsonDecode(content) as Map<String, dynamic>;
+        }
+      }
+    } catch (e) {
+      debugPrint('REST extraction error: $e');
+    }
+    return null;
   }
 
 

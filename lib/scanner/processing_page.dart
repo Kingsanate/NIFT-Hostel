@@ -77,6 +77,7 @@ class _ProcessingPageState extends State<ProcessingPage> {
         });
 
         final faceFuture = ImageHelper.cropFaceFromImage(widget.imagePath)
+            .timeout(const Duration(seconds: 3), onTimeout: () => null)
             .catchError((_) => null); // Ignore face crop errors
 
         // Wait for both to finish concurrently
