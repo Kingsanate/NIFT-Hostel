@@ -229,10 +229,17 @@ class _TopBar extends StatelessWidget {
                 mainAxisSize: MainAxisSize.min,
                 crossAxisAlignment: CrossAxisAlignment.center,
                 children: [
-                  Image.asset(
-                    'assets/images/nift_header_logo.png',
-                    height: 24,
-                    fit: BoxFit.contain,
+                  ValueListenableBuilder<bool>(
+                    valueListenable: darkModeNotifier,
+                    builder: (context, isDark, _) {
+                      return Image.asset(
+                        isDark
+                            ? 'assets/images/nift_header_logo_dark.png'
+                            : 'assets/images/nift_header_logo.png',
+                        height: 28,
+                        fit: BoxFit.contain,
+                      );
+                    },
                   ),
                   const SizedBox(width: 8),
                   Text(
