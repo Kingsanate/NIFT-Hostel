@@ -225,29 +225,26 @@ class _TopBar extends StatelessWidget {
           Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              RichText(
-                text: TextSpan(
-                  children: [
-                    TextSpan(
-                      text: 'NIFT ',
-                      style: const TextStyle(
-                        color: Colors.blueAccent,
-                        fontSize: 15,
-                        fontWeight: FontWeight.w900,
-                        letterSpacing: -0.3,
-                      ),
+              Row(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.center,
+                children: [
+                  Image.asset(
+                    'assets/images/nift_header_logo.png',
+                    height: 24,
+                    fit: BoxFit.contain,
+                  ),
+                  const SizedBox(width: 8),
+                  Text(
+                    'Hostel Shillong',
+                    style: TextStyle(
+                      color: ChatPalette.isDark ? Colors.white : Colors.black,
+                      fontSize: 15,
+                      fontWeight: FontWeight.w800,
+                      letterSpacing: -0.3,
                     ),
-                    TextSpan(
-                      text: 'Hostel Shillong',
-                      style: TextStyle(
-                        color: ChatPalette.isDark ? Colors.white : Colors.black,
-                        fontSize: 15,
-                        fontWeight: FontWeight.w800,
-                        letterSpacing: -0.3,
-                      ),
-                    ),
-                  ],
-                ),
+                  ),
+                ],
               ),
               const Text('Smart Management System',
                   style: TextStyle(color: Pal.textDim, fontSize: 11, fontWeight: FontWeight.w500)),

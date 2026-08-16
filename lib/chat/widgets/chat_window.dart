@@ -123,32 +123,33 @@ class _Header extends StatelessWidget {
             onTap: onMenu,
             tooltip: sidebarVisible ? 'Close sidebar' : 'Open sidebar',
           ),
-          SizedBox(width: 8),
-          // Title
+          const SizedBox(width: 8),
+          // Logo + Title
           Expanded(
-            child: RichText(
-              text: TextSpan(
-                children: [
-                  TextSpan(
-                    text: 'NIFT ',
-                    style: TextStyle(
-                      color: ChatPalette.accent,
-                      fontSize: 15,
-                      fontWeight: FontWeight.w900,
-                      letterSpacing: -0.3,
-                    ),
-                  ),
-                  TextSpan(
-                    text: 'Hostel Shillong',
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.center,
+              children: [
+                Image.asset(
+                  'assets/images/nift_header_logo.png',
+                  height: 28,
+                  fit: BoxFit.contain,
+                ),
+                const SizedBox(width: 8),
+                Flexible(
+                  child: Text(
+                    'Hostel Shillong',
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
                     style: TextStyle(
                       color: ChatPalette.text,
-                      fontSize: 15,
+                      fontSize: 15.5,
                       fontWeight: FontWeight.w800,
                       letterSpacing: -0.3,
                     ),
                   ),
-                ],
-              ),
+                ),
+              ],
             ),
           ),
           // Notification bell — navigates to RemindersPage
