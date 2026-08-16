@@ -233,9 +233,9 @@ class _ChatPageState extends State<ChatPage> {
               onScanNew: _openScanner,
               onBack: () => setState(
                   () => _selectedDestination = SidebarDestination.newChat),
-              onDeleteStudent: (id) async {
-                await StudentRepository.deleteStudent(id);
-                ApiService.deleteStudent(id).catchError((e) => false);
+              onDeleteStudent: (student) async {
+                final ok = await StudentRepository.deleteStudent(student);
+                return ok;
               },
               onUpdateStudent: (updatedStudent) async {
                 await StudentRepository.updateStudent(updatedStudent);

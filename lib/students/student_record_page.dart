@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 import 'dart:typed_data';
@@ -13,6 +14,8 @@ import '../chat/chat_palette.dart';
 import '../scanner/models/student_model.dart';
 import '../services/api_service.dart';
 import '../services/student_record_cache.dart';
+import '../services/websocket_service.dart';
+import '../widgets/confirm_dialog.dart';
 import 'models/medical_treatment_model.dart';
 
 class StudentRecordPage extends StatefulWidget {
@@ -39,6 +42,8 @@ class _StudentRecordPageState extends State<StudentRecordPage>
   List<MedicalTreatmentRecord> _treatmentRecords = [];
 
   Uint8List? _cachedPhotoBytes;
+  StreamSubscription? _wsSub;
+  Timer? _treatDebounce;
 
   @override
   void initState() {
@@ -46,6 +51,16 @@ class _StudentRecordPageState extends State<StudentRecordPage>
     _student = widget.student;
     _tabController = TabController(length: 4, vsync: this);
     _decodePhoto();
+
+    // Live refresh when treatment records change on any device
+    _wsSub = WebSocketService.instance.events.listen((event) {
+      if (event['type'] != 'MEDICAL_TREATMENT_CHANGED') return;
+      _treatDebounce?.cancel();
+      _treatDebounce = Timer(const Duration(milliseconds: 400), () {
+        _treatDebounce = null;
+        if (mounted) _fetchTreatments();
+      });
+    });
 
     // ⚡ WhatsApp-style 0ms Instant Cache Loading:
     final cachedLeaves = StudentRecordCache.getLeaves(_student.rollNo);
@@ -62,6 +77,8 @@ class _StudentRecordPageState extends State<StudentRecordPage>
 
   @override
   void dispose() {
+    _wsSub?.cancel();
+    _treatDebounce?.cancel();
     _tabController.dispose();
     super.dispose();
   }
@@ -1688,41 +1705,57 @@ SUMMARY METRICS:
   }
 
   void _deleteTreatment(String id) async {
-    final confirm = await showDialog<bool>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        backgroundColor: ChatPalette.surface,
-        title: Text('Delete Medical Record?',
-            style: TextStyle(color: ChatPalette.text, fontSize: 16)),
-        content: Text(
-            'Are you sure you want to delete this treatment & prescription entry?',
-            style: TextStyle(color: ChatPalette.muted, fontSize: 13)),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx, false),
-            child: Text('Cancel', style: TextStyle(color: ChatPalette.muted)),
-          ),
-          ElevatedButton(
-            onPressed: () => Navigator.pop(ctx, true),
-            style:
-                ElevatedButton.styleFrom(backgroundColor: ChatPalette.accentRose),
-            child: const Text('Delete', style: TextStyle(color: Colors.white)),
-          ),
-        ],
-      ),
+    final confirm = await ConfirmDialog.show(
+      context,
+      title: 'Delete Medical Record?',
+      message:
+          'Are you sure you want to delete this treatment & prescription entry? This cannot be undone.',
     );
+    if (confirm != true || !mounted) return;
 
-    if (confirm != true) return;
-
+    // 1. Optimistic 0ms removal from UI + cache
+    final removed = _treatmentRecords
+        .where((t) => t.id == id)
+        .toList();
     setState(() {
       _treatmentRecords.removeWhere((t) => t.id == id);
     });
     StudentRecordCache.removeTreatment(_student.rollNo, id);
 
-    try {
-      await ApiService.deleteMedicalTreatment(id);
-    } catch (e) {
-      debugPrint('Delete treatment error: $e');
+    // 2. Background server delete with real result
+    final ok = await ApiService.deleteMedicalTreatment(id);
+    if (!ok && mounted) {
+      // Restore the record so nothing is silently lost.
+      setState(() {
+        _treatmentRecords = [...removed, ..._treatmentRecords];
+        _treatmentRecords.sort((a, b) =>
+            b.treatmentDate.compareTo(a.treatmentDate));
+      });
+      StudentRecordCache.setTreatments(
+        _student.rollNo,
+        [...removed, ..._treatmentRecords],
+      );
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Delete failed — please check your connection and try again.',
+              style: TextStyle(fontWeight: FontWeight.bold, color: Colors.white)),
+          backgroundColor: Color(0xFFDC2626),
+          behavior: SnackBarBehavior.floating,
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.all(Radius.circular(10))),
+          duration: Duration(seconds: 3),
+        ),
+      );
+    } else if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Medical record deleted',
+              style: TextStyle(fontWeight: FontWeight.bold, color: Colors.white)),
+          backgroundColor: Color(0xFF16A34A),
+          behavior: SnackBarBehavior.floating,
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.all(Radius.circular(10))),
+          duration: Duration(seconds: 2),
+        ),
+      );
     }
   }
 

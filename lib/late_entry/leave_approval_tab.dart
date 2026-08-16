@@ -303,67 +303,62 @@ class _LeaveApprovalTabState extends State<LeaveApprovalTab> {
     }
 
     String? formImageUrl;
-    try {
-      // Show upload loading dialog
-      if (mounted) {
-        showDialog(
-          context: context,
-          barrierDismissible: false,
-          builder: (_) => PopScope(
-            canPop: false,
-            child: Center(
-              child: Container(
-                padding: const EdgeInsets.symmetric(horizontal: 28, vertical: 24),
-                decoration: BoxDecoration(
-                  color: ChatPalette.surface,
-                  borderRadius: BorderRadius.circular(18),
-                  border: Border.all(color: ChatPalette.borderSoft),
-                ),
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    CircularProgressIndicator(color: ChatPalette.accentDeep, strokeWidth: 3),
-                    const SizedBox(height: 16),
-                    Text(
-                      'Uploading form…',
-                      style: TextStyle(color: ChatPalette.text, fontSize: 13, fontWeight: FontWeight.w600),
-                    ),
-                    const SizedBox(height: 4),
-                    Text(
-                      '${(imageBytes.length / 1024).toStringAsFixed(0)} KB',
-                      style: TextStyle(color: ChatPalette.muted, fontSize: 11),
-                    ),
-                  ],
-                ),
+    String? uploadError;
+
+    // Show upload loading dialog
+    if (mounted) {
+      showDialog(
+        context: context,
+        barrierDismissible: false,
+        builder: (_) => PopScope(
+          canPop: false,
+          child: Center(
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 28, vertical: 24),
+              decoration: BoxDecoration(
+                color: ChatPalette.surface,
+                borderRadius: BorderRadius.circular(18),
+                border: Border.all(color: ChatPalette.borderSoft),
+              ),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  CircularProgressIndicator(color: ChatPalette.accentDeep, strokeWidth: 3),
+                  const SizedBox(height: 16),
+                  Text(
+                    'Uploading form…',
+                    style: TextStyle(color: ChatPalette.text, fontSize: 13, fontWeight: FontWeight.w600),
+                  ),
+                  const SizedBox(height: 4),
+                  Text(
+                    '${(imageBytes.length / 1024).toStringAsFixed(0)} KB',
+                    style: TextStyle(color: ChatPalette.muted, fontSize: 11),
+                  ),
+                ],
               ),
             ),
           ),
-        );
-      }
+        ),
+      );
+    }
 
+    // Upload is best-effort — the record is always saved locally with the
+    // base64 image so a scan is never lost on slow/offline connections.
+    try {
       final res = await ApiService.uploadFormPhoto(
         imageBytes: imageBytes,
         rollNo: student.rollNo,
       );
       if (res['success'] == true && res['photoUrl'] != null) {
         formImageUrl = res['photoUrl'];
+      } else {
+        uploadError = res['error']?.toString() ?? 'photo upload failed';
       }
-
-      if (mounted) Navigator.of(context).pop(); // Close loading dialog
     } catch (e) {
       debugPrint('Failed to upload form image: $e');
-      if (mounted) {
-        Navigator.of(context).pop(); // Close loading dialog
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Upload failed: $e'),
-            backgroundColor: ChatPalette.accentRose,
-            behavior: SnackBarBehavior.floating,
-            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-          ),
-        );
-      }
-      return;
+      uploadError = e.toString();
+    } finally {
+      if (mounted) Navigator.of(context).pop(); // Close loading dialog
     }
 
     final record = LeaveApprovalRecord(
@@ -383,6 +378,31 @@ class _LeaveApprovalTabState extends State<LeaveApprovalTab> {
 
     widget.onAdd(record);
     if (!mounted) return;
+
+    if (uploadError != null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Row(
+            children: [
+              Icon(Icons.cloud_off_rounded, color: Colors.white, size: 18),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text(
+                  'Leave form saved locally for ${student.name} — photo will sync to server when online.',
+                  style: const TextStyle(fontWeight: FontWeight.w600, color: Colors.white),
+                ),
+              ),
+            ],
+          ),
+          backgroundColor: ChatPalette.accentAmber,
+          behavior: SnackBarBehavior.floating,
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+          duration: const Duration(seconds: 4),
+        ),
+      );
+      return;
+    }
+
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
         content: Row(

@@ -119,8 +119,13 @@ void _initBackgroundServices() async {
     debugPrint('Storage init error: $e');
   }
 
-  // 4. Background dynamic config sync
-  AppConfig.loadFromOracle();
+  // 4. Background dynamic config sync (awaited so scanner AI keys are
+  // ready before the scanner module is first opened on web)
+  try {
+    await AppConfig.loadFromOracle().timeout(const Duration(seconds: 10));
+  } catch (e) {
+    debugPrint('Config sync error: $e');
+  }
 }
 
 class NiftHostelApp extends ConsumerWidget {

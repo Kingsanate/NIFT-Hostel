@@ -5,6 +5,7 @@ import 'package:intl/intl.dart';
 import '../chat/chat_palette.dart';
 import '../services/api_service.dart';
 import '../services/websocket_service.dart';
+import '../widgets/confirm_dialog.dart';
 
 class RemindersPage extends StatefulWidget {
   const RemindersPage({super.key});
@@ -55,23 +56,13 @@ class _RemindersPageState extends State<RemindersPage> {
   }
 
   Future<void> _deleteReminder(String id) async {
-    final confirm = await showDialog<bool>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        backgroundColor: ChatPalette.surface,
-        title: Text('Delete Reminder', style: TextStyle(color: ChatPalette.text)),
-        content: Text('Are you sure you want to delete this reminder?', style: TextStyle(color: ChatPalette.dim)),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel')),
-          TextButton(
-            onPressed: () => Navigator.pop(ctx, true), 
-            child: const Text('Delete', style: TextStyle(color: Colors.redAccent))
-          ),
-        ],
-      ),
+    final confirm = await ConfirmDialog.show(
+      context,
+      title: 'Delete Reminder?',
+      message: 'Are you sure you want to delete this reminder? This cannot be undone.',
+      icon: Icons.notifications_off_outlined,
     );
-
-    if (confirm != true) return;
+    if (confirm != true || !mounted) return;
 
     // Optimistic 0ms UI update
     setState(() {
@@ -86,23 +77,14 @@ class _RemindersPageState extends State<RemindersPage> {
   }
 
   Future<void> _clearAllReminders() async {
-    final confirm = await showDialog<bool>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        backgroundColor: ChatPalette.surface,
-        title: Text('Clear All Reminders', style: TextStyle(color: ChatPalette.text)),
-        content: Text('Are you sure you want to delete ALL reminders? This cannot be undone.', style: TextStyle(color: ChatPalette.dim)),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel')),
-          TextButton(
-            onPressed: () => Navigator.pop(ctx, true), 
-            child: const Text('Clear All', style: TextStyle(color: Colors.redAccent))
-          ),
-        ],
-      ),
+    final confirm = await ConfirmDialog.show(
+      context,
+      title: 'Clear All Reminders?',
+      message: 'Are you sure you want to delete ALL reminders? This cannot be undone.',
+      confirmLabel: 'Clear All',
+      icon: Icons.delete_sweep_outlined,
     );
-
-    if (confirm != true) return;
+    if (confirm != true || !mounted) return;
 
     final toDelete = List<Map<String, dynamic>>.from(_reminders);
     setState(() {

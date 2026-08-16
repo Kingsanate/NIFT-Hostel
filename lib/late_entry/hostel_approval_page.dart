@@ -1,8 +1,12 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_animate/flutter_animate.dart';
 import 'package:intl/intl.dart';
 
 import '../chat/chat_palette.dart';
+import '../services/websocket_service.dart';
+import '../widgets/confirm_dialog.dart';
 import 'late_entry_tab.dart';
 import 'leave_approval_tab.dart';
 import 'models/entry_models.dart';
@@ -32,6 +36,8 @@ class _HostelApprovalPageState extends State<HostelApprovalPage>
   DateTime _month = DateTime(DateTime.now().year, DateTime.now().month, 1);
   List<LateEntryRecord> _lateEntries = [];
   List<LeaveApprovalRecord> _leaveApprovals = [];
+  StreamSubscription<Map<String, dynamic>>? _wsSub;
+  bool _refreshing = false;
 
   @override
   void initState() {
@@ -40,54 +46,91 @@ class _HostelApprovalPageState extends State<HostelApprovalPage>
     _tabCtrl.addListener(() {
       if (mounted) setState(() {});
     });
+    // Live real-time sync: refresh instantly when another device
+    // adds / updates / deletes a leave application or late entry.
+    _wsSub = WebSocketService.instance.events.listen((event) {
+      final type = event['type']?.toString() ?? '';
+      if (type == 'LEAVE_LOGGED' || type == 'LATE_ENTRY_LOGGED') {
+        _loadDataBackground();
+      }
+    });
     // Load from Hive in background — no blocking setState(\_loading = true)
     _loadDataBackground();
   }
 
   @override
   void dispose() {
+    _wsSub?.cancel();
     _tabCtrl.dispose();
     super.dispose();
   }
 
   Future<void> _loadDataBackground() async {
-    final results = await Future.wait([
-      EntryStore.loadLateEntries(),
-      EntryStore.loadLeaveApprovals(),
-    ]);
-    if (!mounted) return;
-    setState(() {
-      _lateEntries = (results[0] as List<LateEntryRecord>)
-          .where((r) => r.hostel == widget.hostel)
-          .toList();
-      _leaveApprovals = (results[1] as List<LeaveApprovalRecord>)
-          .where((r) => r.hostel == widget.hostel)
-          .toList();
-    });
+    if (_refreshing) return;
+    _refreshing = true;
+    try {
+      final results = await Future.wait([
+        EntryStore.loadLateEntries(hostel: widget.hostel),
+        EntryStore.loadLeaveApprovals(hostel: widget.hostel),
+      ]);
+      if (!mounted) return;
+      setState(() {
+        _lateEntries = (results[0] as List<LateEntryRecord>)
+            .where((r) => r.hostel == widget.hostel)
+            .toList();
+        _leaveApprovals = (results[1] as List<LeaveApprovalRecord>)
+            .where((r) => r.hostel == widget.hostel)
+            .toList();
+      });
+    } finally {
+      _refreshing = false;
+    }
   }
 
   void _addLateEntry(LateEntryRecord record) async {
-    setState(() => _lateEntries = [record, ..._lateEntries]);
-    await EntryStore.saveLateEntries(
-        [record, ...await EntryStore.loadLateEntries()]);
+    setState(() =>
+        _lateEntries = [record, ..._lateEntries.where((r) => r.id != record.id)]);
+    final updated = await EntryStore.saveLateEntry(record);
+    if (!mounted) return;
+    setState(() {
+      _lateEntries = updated.where((r) => r.hostel == widget.hostel).toList();
+    });
   }
 
   void _deleteLateEntry(String id) async {
+    final confirm = await ConfirmDialog.show(
+      context,
+      title: 'Delete Late Entry?',
+      message: 'Are you sure you want to permanently delete this late entry record?',
+      confirmLabel: 'Delete',
+    );
+    if (confirm != true || !mounted) return;
     final next = _lateEntries.where((r) => r.id != id).toList();
     setState(() => _lateEntries = next);
-    await EntryStore.saveLateEntries(next);
+    await EntryStore.deleteLateEntry(id);
   }
 
   void _addLeaveApproval(LeaveApprovalRecord record) async {
-    setState(() => _leaveApprovals = [record, ..._leaveApprovals]);
-    await EntryStore.saveLeaveApprovals(
-        [record, ...await EntryStore.loadLeaveApprovals()]);
+    setState(() =>
+        _leaveApprovals = [record, ..._leaveApprovals.where((r) => r.id != record.id)]);
+    final updated = await EntryStore.saveLeaveApproval(record);
+    if (!mounted) return;
+    setState(() {
+      _leaveApprovals = updated.where((r) => r.hostel == widget.hostel).toList();
+    });
   }
 
   void _deleteLeaveApproval(String id) async {
+    final confirm = await ConfirmDialog.show(
+      context,
+      title: 'Delete Leave Application?',
+      message: 'Are you sure you want to permanently delete this leave application? This cannot be undone.',
+      confirmLabel: 'Delete',
+    );
+    if (confirm != true || !mounted) return;
     final next = _leaveApprovals.where((r) => r.id != id).toList();
     setState(() => _leaveApprovals = next);
-    await EntryStore.saveLeaveApprovals(next);
+    await EntryStore.deleteLeaveApproval(id);
   }
 
   void _shiftMonth(int delta) {

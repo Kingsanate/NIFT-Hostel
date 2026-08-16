@@ -24,6 +24,7 @@ class StudentRepository {
   static bool _initialized = false;
   static bool _isSyncing = false;
   static StreamSubscription? _wsSub;
+  static Timer? _syncDebounce;
 
   static String _mapHostelId(dynamic raw) {
     if (raw == null) return 'Boys Hostel';
@@ -78,14 +79,52 @@ class StudentRepository {
         return;
       }
       debugPrint('⚡ [StudentRepository] Syncing on WebSocket event: $type');
-      syncWithBackend();
-      if (type == 'MEDICAL_CHANGED' || type == 'LEAVE_CHANGED' || type == 'LATE_ENTRY_CHANGED') {
-        StudentRecordCache.preloadAll();
+      if (type == 'STUDENTS_CHANGED') {
+        final data = event['data'];
+        if (data is Map && data['action'] == 'delete') {
+          final targetId = data['id']?.toString() ?? '';
+          if (targetId.isNotEmpty) {
+            final current = List<StudentModel>.from(studentsNotifier.value);
+            current.removeWhere((s) =>
+                s.id == targetId ||
+                s.rollNo.trim().toUpperCase() == targetId.trim().toUpperCase());
+            studentsNotifier.value = current;
+            _persistToDisk();
+          }
+        }
+      }
+      _scheduleSync();
+      if (type == 'MEDICAL_CHANGED' ||
+          type == 'MEDICAL_TREATMENT_CHANGED' ||
+          type == 'LEAVE_LOGGED' ||
+          type == 'LATE_ENTRY_LOGGED') {
+        _scheduleRecordPreload();
       }
     });
   }
 
-  /// Silent background sync with Oracle backend — never wipes local memory on error
+  static Timer? _recordPreloadDebounce;
+
+  /// Debounced record preload — one refresh per burst of events.
+  static void _scheduleRecordPreload() {
+    _recordPreloadDebounce?.cancel();
+    _recordPreloadDebounce = Timer(const Duration(milliseconds: 500), () {
+      _recordPreloadDebounce = null;
+      StudentRecordCache.preloadAll();
+    });
+  }
+
+  /// Debounced background sync — collapses bursts of WebSocket events into a
+  /// single fetch so rapid multi-device activity never thrashes the network.
+  static void _scheduleSync() {
+    _syncDebounce?.cancel();
+    _syncDebounce = Timer(const Duration(milliseconds: 500), () {
+      _syncDebounce = null;
+      syncWithBackend();
+    });
+  }
+
+  /// Silent background sync with Oracle backend — authoritative fresh list
   static Future<void> syncWithBackend() async {
     if (_isSyncing) return;
     _isSyncing = true;
@@ -98,30 +137,13 @@ class StudentRepository {
           _mapHostelId(e['hostelId'] ?? e['hostel_id'] ?? e['hostel']),
         )).toList();
 
-        // Merge: keep any locally newly added students that haven't propagated yet
-        final current = List<StudentModel>.from(studentsNotifier.value);
-        final merged = <StudentModel>[];
-
-        // Add fresh items from backend
-        merged.addAll(freshList);
-
-        // Preserve any recent local additions that aren't on backend yet
-        for (final s in current) {
-          final exists = merged.any((m) =>
-              m.id == s.id ||
-              m.rollNo.trim().toUpperCase() == s.rollNo.trim().toUpperCase());
-          if (!exists) {
-            merged.add(s);
-          }
-        }
-
-        merged.sort((a, b) => b.createdAt.compareTo(a.createdAt));
-        studentsNotifier.value = merged;
+        freshList.sort((a, b) => b.createdAt.compareTo(a.createdAt));
+        studentsNotifier.value = freshList;
 
         // Persist to disk
         final prefs = await SharedPreferences.getInstance();
         await prefs.setString('cached_students', jsonEncode(backendList));
-        debugPrint('⚡ [StudentRepository] Synced ${merged.length} students from backend');
+        debugPrint('⚡ [StudentRepository] Synced ${freshList.length} students from backend');
       }
     } catch (e) {
       debugPrint('[StudentRepository] Silent sync error: $e');
@@ -156,13 +178,27 @@ class StudentRepository {
     _persistToDisk();
   }
 
-  /// Delete student locally with 0ms UI response + async backend delete
-  static Future<void> deleteStudent(String id) async {
+  /// Delete student with 0ms optimistic UI + real backend verification.
+  /// Returns `true` when the student was removed from the server, `false`
+  /// otherwise (the student is restored locally so no data is lost).
+  static Future<bool> deleteStudent(StudentModel student) async {
     final current = List<StudentModel>.from(studentsNotifier.value);
-    current.removeWhere((s) => s.id == id || s.rollNo == id);
+    current.removeWhere((s) =>
+        s.id == student.id || s.rollNo.trim().toUpperCase() == student.rollNo.trim().toUpperCase());
     studentsNotifier.value = current;
-
     _persistToDisk();
+
+    final ok = await ApiService.deleteStudent(student.id);
+    if (!ok) {
+      // Restore the student immediately so nothing is silently lost.
+      final restored = List<StudentModel>.from(studentsNotifier.value);
+      restored.removeWhere((s) =>
+          s.id == student.id || s.rollNo.trim().toUpperCase() == student.rollNo.trim().toUpperCase());
+      restored.insert(0, student);
+      studentsNotifier.value = restored;
+      _persistToDisk();
+    }
+    return ok;
   }
 
   static Future<void> _persistToDisk() async {

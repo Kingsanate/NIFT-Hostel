@@ -2,7 +2,7 @@ name: nift_hostel_flutter
 description: "NIFT Hostel — Smart Student Management System"
 publish_to: 'none'
 
-version: 2.8.0+280
+version: 2.8.1+281
 
 environment:
   sdk: '>=3.0.0 <4.0.0'

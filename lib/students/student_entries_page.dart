@@ -10,6 +10,7 @@ import '../scanner/models/student_model.dart';
 import '../services/api_service.dart';
 import '../services/websocket_service.dart';
 import '../services/student_repository.dart';
+import '../widgets/confirm_dialog.dart';
 import 'student_record_page.dart';
 
 // Top-level cache to survive hot reloads and avoid State static issues in dart2js
@@ -21,7 +22,7 @@ class StudentEntriesPage extends StatefulWidget {
   final List<StudentModel> entries;
   final VoidCallback onScanNew;
   final VoidCallback? onBack;
-  final Function(String id)? onDeleteStudent;
+  final Function(StudentModel student)? onDeleteStudent;
   final Function(StudentModel student)? onUpdateStudent;
 
   const StudentEntriesPage({
@@ -604,7 +605,7 @@ class _StudentCard extends StatefulWidget {
   final bool isLiveBooked;
   final DateTime? liveTime;
   final String? liveType;
-  final Function(String)? onDelete;
+  final Function(StudentModel)? onDelete;
   final Function(StudentModel)? onUpdate;
   final Function(String studentId, String rollNo, String? type, DateTime? time)? onBookingChanged;
 
@@ -669,104 +670,52 @@ Hostel: ${s.hostel}
   }
 
   void _deleteStudent() async {
-    final confirm = await showDialog<bool>(
-      context: context,
-      builder: (ctx) => Dialog(
-        backgroundColor: Colors.transparent,
-        child: Container(
-          padding: const EdgeInsets.all(24),
-          decoration: BoxDecoration(
-            color: ChatPalette.surface,
-            borderRadius: BorderRadius.circular(20),
-            border: Border.all(color: ChatPalette.accentRose.withValues(alpha: 0.3)),
-            boxShadow: [
-              BoxShadow(
-                color: ChatPalette.accentRose.withValues(alpha: 0.2),
-                blurRadius: 30,
-                spreadRadius: -5,
-              ),
-            ],
-          ),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Container(
-                padding: const EdgeInsets.all(16),
-                decoration: BoxDecoration(
-                  color: ChatPalette.accentRose.withValues(alpha: 0.1),
-                  shape: BoxShape.circle,
-                ),
-                child: Icon(Icons.delete_forever_rounded, color: ChatPalette.accentRose, size: 28),
-              ),
-              const SizedBox(height: 20),
-              Text('Remove Student?', 
-                  style: TextStyle(color: ChatPalette.text, fontSize: 16, fontWeight: FontWeight.bold)),
-              const SizedBox(height: 10),
-              Text(
-                'Are you sure you want to completely remove ${widget.student.name} from the database? This action cannot be undone.',
-                textAlign: TextAlign.center,
-                style: TextStyle(color: ChatPalette.dim, fontSize: 14, height: 1.5),
-              ),
-              const SizedBox(height: 24),
-              Row(
-                children: [
-                  Expanded(
-                    child: TextButton(
-                      onPressed: () => Navigator.pop(ctx, false),
-                      style: TextButton.styleFrom(
-                        padding: const EdgeInsets.symmetric(vertical: 14),
-                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-                        backgroundColor: ChatPalette.surfaceHigh,
-                      ),
-                      child: Text('Cancel', style: TextStyle(color: ChatPalette.text, fontWeight: FontWeight.bold)),
-                    ),
-                  ),
-                  const SizedBox(width: 12),
-                  Expanded(
-                    child: TextButton(
-                      onPressed: () => Navigator.pop(ctx, true),
-                      style: TextButton.styleFrom(
-                        padding: const EdgeInsets.symmetric(vertical: 14),
-                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-                        backgroundColor: ChatPalette.accentRose,
-                      ),
-                      child: const Text('Delete', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
-                    ),
-                  ),
-                ],
-              ),
-            ],
-          ),
-        ),
-      ),
+    final confirm = await ConfirmDialog.show(
+      context,
+      title: 'Remove Student?',
+      message:
+          'Are you sure you want to completely remove ${widget.student.name} from the database? This action cannot be undone.',
+      confirmLabel: 'Delete',
     );
-    if (confirm != true) return;
+    if (confirm != true || !mounted) return;
 
-    final studentId = widget.student.id;
-    // 1. Instantly close detail modal (0ms UI lag)
-    if (mounted) Navigator.pop(context);
+    final student = widget.student;
 
-    // 2. Instantly update UI and local state
-    if (widget.onDelete != null) widget.onDelete!(studentId);
+    // 1. Optimistic local removal (repo + parent list update)
+    var ok = false;
+    if (widget.onDelete != null) {
+      ok = await widget.onDelete!(student);
+    } else {
+      ok = await StudentRepository.deleteStudent(student);
+    }
 
-    // 3. Show instant confirmation snackbar
-    if (mounted) {
+    if (!mounted) return;
+
+    if (ok) {
+      // 2. Success — instant feedback
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: const Text('Student deleted successfully', style: TextStyle(fontWeight: FontWeight.bold, color: Colors.white)),
-          backgroundColor: ChatPalette.accentRose,
+          content: Text('${student.name} removed successfully',
+              style: const TextStyle(fontWeight: FontWeight.bold, color: Colors.white)),
+          backgroundColor: const Color(0xFF16A34A),
           behavior: SnackBarBehavior.floating,
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+          shape: const RoundedRectangleBorder(borderRadius: BorderRadius.all(Radius.circular(10))),
           duration: const Duration(seconds: 2),
         ),
       );
+    } else {
+      // 3. Failure — student already restored by the repository; tell the user
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Delete failed — please check your connection and try again.',
+              style: TextStyle(fontWeight: FontWeight.bold, color: Colors.white)),
+          backgroundColor: Color(0xFFDC2626),
+          behavior: SnackBarBehavior.floating,
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.all(Radius.circular(10))),
+          duration: Duration(seconds: 3),
+        ),
+      );
     }
-
-    // 4. Background server deletion
-    ApiService.deleteStudent(studentId).catchError((e) {
-      debugPrint('Background delete failed for $studentId: $e');
-      return false;
-    });
   }
 
   void _updateBooking(String? type, {String? notes}) {

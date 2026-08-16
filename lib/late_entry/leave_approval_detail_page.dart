@@ -306,7 +306,7 @@ class _LeaveApprovalDetailPageState extends State<LeaveApprovalDetailPage> {
         _record.formImageBase64!.trim().isNotEmpty) {
       return _buildImageCard(
         imageWidget: Image.memory(
-          base64Decode(_record.formImageBase64!.split(',').last),
+          _decodeBase64(_record.formImageBase64) ?? Uint8List(0),
           width: double.infinity,
           fit: BoxFit.contain,
           gaplessPlayback: true,
@@ -531,7 +531,9 @@ class _LeaveApprovalDetailPageState extends State<LeaveApprovalDetailPage> {
                 label: Text(
                   (!kIsWeb && Platform.isAndroid)
                       ? 'Scan with Google ML Kit'
-                      : 'Capture form photo',
+                      : kIsWeb
+                          ? 'Upload form photo'
+                          : 'Capture form photo',
                   style: const TextStyle(fontWeight: FontWeight.bold),
                 ),
                 style: ElevatedButton.styleFrom(
@@ -578,7 +580,7 @@ class _LeaveApprovalDetailPageState extends State<LeaveApprovalDetailPage> {
     widget.onUpdateRecord?.call(_record);
 
     // Save to Hive & background backend sync
-    await EntryStore.saveLeaveApprovals([_record, ...await EntryStore.loadLeaveApprovals()]);
+    await EntryStore.saveLeaveApproval(_record);
 
     if (mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -630,6 +632,15 @@ class _LeaveApprovalDetailPageState extends State<LeaveApprovalDetailPage> {
     }
   }
 
+  Uint8List? _decodeBase64(String? b64) {
+    if (b64 == null || b64.trim().isEmpty) return null;
+    try {
+      return base64Decode(b64.split(',').last);
+    } catch (_) {
+      return null;
+    }
+  }
+
   void _openFullscreenViewer({
     required String title,
     String? imageBase64,
@@ -663,7 +674,7 @@ class _LeaveApprovalDetailPageState extends State<LeaveApprovalDetailPage> {
               maxScale: 4.0,
               child: imageBase64 != null && imageBase64.isNotEmpty
                   ? Image.memory(
-                      base64Decode(imageBase64.split(',').last),
+                      _decodeBase64(imageBase64) ?? Uint8List(0),
                       fit: BoxFit.contain,
                     )
                   : (imageUrl != null && imageUrl.isNotEmpty
